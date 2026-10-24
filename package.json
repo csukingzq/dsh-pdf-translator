@@ -5,7 +5,7 @@
   "type": "module",
   "main": "src/index.js",
   "author": "csukingzq",
-  "license": "AGPL-3.0-or-later",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/csukingzq/dsh-pdf-translator.git"
@@ -23,7 +23,6 @@
     "requirements.txt",
     "config.example.json",
     "README.md",
-    "NOTICE.md",
     "VERIFICATION.md",
     "CHANGELOG.md",
     "LICENSE",

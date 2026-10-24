@@ -6,7 +6,7 @@
 
 - 发布到 npm，可用 `dsh-pdf-translator` 包名安装。
 - 提供 GitHub Release 预构建 `.tgz`，无需安装时构建。
-- 新增 `LICENSE`（AGPL-3.0）、仓库/问题链接和发布元数据。
+- 新增 `LICENSE`（MIT）、仓库/问题链接和发布元数据。
 - 默认把配置、Python 环境、Tectonic/Pandoc 和缓存保存到 `%DSH_HOME%\dsh-pdf-translator`，插件更新不再清掉用户数据；检测到旧版包内配置或状态时继续使用旧目录。
 - `scripts/setup.ps1` 支持 DSH 桌面自带的 Python，自动创建虚拟环境、安装依赖并下载排版运行时。
 - `pdf_translator_doctor` 返回数据目录、配置路径、运行时目录和插件路径，便于排查。

@@ -2,14 +2,14 @@
 
 日期：2026-10-24（Asia/Shanghai）；目标 Harness：0.2.1-rc.3；Node 24.16.0；Python 3.12.13。
 
-- 包版本升级到 0.2.5，新增 npm/GitHub Release 元数据、AGPL-3.0 许可证、`CHANGELOG.md`、`screenshots.json` 和 `docs/marketplace-entry.yml`。
+- 包版本升级到 0.2.5，新增 npm/GitHub Release 元数据、MIT 许可证、`CHANGELOG.md`、`screenshots.json` 和 `docs/marketplace-entry.yml`。
 - 新增 `src/paths.js`：默认数据目录为 `<DSH_HOME>/dsh-pdf-translator`，检测到旧版包内 `config.json` 或 `work/plugin-state.json` 时继续使用旧目录；配置、Python、运行时均有独立解析和旧目录回退。
 - `src/runner.js` 向 Python 注入 `DSH_PDF_DATA_DIR`、`DSH_PDF_RUNTIME_DIR`；`work/latex_renderer.py` 优先使用注入的运行时目录；`pdf_translator_doctor` 新增 `plugin_root`、`data_dir`、`config_path`、`runtime_dir`。
 - `scripts/setup.ps1` 重写：优先使用 DSH 桌面自带 Python，支持 `-DataDir`、`-Force`、自定义 Tectonic/Pandoc URL；创建数据目录内的 `.venv`，安装依赖，下载排版运行时，首次复制配置。
 - **Node 测试 24 项全部通过**（含新增 paths 解析测试），使用真实 Cordis/ToolRuntime/JobRegistry/Gateway 与已打包前端。
 - **Python 测试 56 项全部通过**，含真实 Tectonic 编译；测试临时目录使用工作区内路径。
 - `npm run build`、`npm run check` 通过。
-- `npm pack` 生成 `dsh-pdf-translator-0.2.5.tgz`：37 个文件，162.4 kB；`scripts/verify-package.mjs` 校验通过，包内无 `.venv`、`runtime`、`config.json`、缓存、输出、密钥或测试临时文件。
+- `npm pack` 生成 `dsh-pdf-translator-0.2.5.tgz`：36 个文件，150.2 kB；`scripts/verify-package.mjs` 校验通过，包内无 `.venv`、`runtime`、`config.json`、缓存、输出、密钥或测试临时文件。
 - 在隔离数据目录实测 `setup.ps1`：能使用 DSH 桌面自带 Python 创建 `.venv`，pip 安装 PyMuPDF/bs4，成功下载并解压 Tectonic 0.17.0 与 Pandoc 3.12.1，首次生成 `config.json`；`pdf_translator_doctor` 返回的 Python、Pandoc、Tectonic、配置和路径均正确。
 - 本次未调用收费模型，未清理用户缓存；真实一页模型验收留到公开发布前由用户确认后执行。
 

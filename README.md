@@ -202,10 +202,10 @@ node scripts\verify-package.mjs dsh-pdf-translator-0.2.5.tgz
 
 测试包括真实 Cordis 工具、Harness 后台任务与严格 Remote 调用、浏览器面板选择/隐藏/确认操作、进程取消、首次 AI 图框坐标直通、表格、公式/脚注、缓存清理与独立导出、目录锁及 LaTeX 编译。`tests/fixtures/vision-sample.pdf` 是图表输入；`session-p10-equation.md` 是从用户会话提取的编译失败回归样例。详细结果见 `VERIFICATION.md`，发布流程见 [docs/RELEASING.md](https://github.com/csukingzq/dsh-pdf-translator/blob/main/docs/RELEASING.md)。
 
-## 兼容性与来源
+## 兼容性
 
 `package.json` 的 `engines.dsh` 为 `>=0.2.1-rc.3 <0.3.0`，`@deepseek-ai` 依赖统一为 `0.2.1-rc.3`。0.2.5 新增持久化数据目录、npm/GitHub Release 分发元数据和安装脚本改进；前端 bundle 与 0.2.4 相同。
 
-接口依据：[官方工具规范](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/cookbook/adding-a-tool.md)、[官方插件打包规范](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/develop/basic/publish.md)。
+## 许可证
 
-许可证与第三方依赖说明见 [NOTICE.md](NOTICE.md)，版本记录见 [CHANGELOG.md](CHANGELOG.md)。
+MIT，详见 [LICENSE](LICENSE)。版本记录见 [CHANGELOG.md](CHANGELOG.md)。

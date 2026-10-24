@@ -72,14 +72,15 @@ test('output defaults persist; cache deletion requires a fresh one-use user conf
   const dir=await temp(t),ctx=new Context(),runner=controlledRunner(),m=new TranslatorManager(ctx,{dataDir:dir},runner.run);
   t.after(()=>m.dispose());
   const chosen=path.join(dir,'中文 输出');await m.settings(chosen);
-  assert.equal((await m.status()).outputDir,chosen);
+  const resolvedChosen=await fs.realpath(chosen);
+  assert.equal((await m.status()).outputDir,resolvedChosen);
   await assert.rejects(m.outputDirectory(path.join(dir,'work/document-cache/nested')),/缓存/);
   await assert.rejects(m.clear('0123456789abcdef','made-up'),/确认/);
   const selection=await m.prepareClear('0123456789abcdef');
   assert.equal((await m.clear(selection.id,selection.token)).cleared,true);
   await assert.rejects(m.clear(selection.id,selection.token),/确认/);
   const restored=new TranslatorManager(ctx,{dataDir:dir},runner.run);await restored.ready;
-  assert.equal((await restored.status()).outputDir,chosen);await restored.dispose();await ctx.fiber.dispose();
+  assert.equal((await restored.status()).outputDir,resolvedChosen);await restored.dispose();await ctx.fiber.dispose();
 });
 
 test('restart marks unfinished jobs interrupted and retains their original parameters',async t=>{
