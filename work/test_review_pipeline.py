@@ -59,7 +59,7 @@ class ReviewTests(unittest.TestCase):
         self.assertIn('修订译文',Path(self.result['markdown']).read_text('utf-8'))
         self.assertIn('修订译文',(self.output.with_suffix('')/'main.tex').read_text('utf-8'))
         journal=review.read(result['backup'])
-        row=next(r for r in journal['files'] if r['target']==self.result['document'])
+        row=next(r for r in journal['files'] if Path(r['target']).resolve()==Path(self.result['document']).resolve())
         self.assertEqual(review.read(Path(result['backup']).parent/row['backup'])['pages'][0],self.page)
         self.assertEqual(review.read(self.result['report'])['ai_review']['rounds'],1)
 
