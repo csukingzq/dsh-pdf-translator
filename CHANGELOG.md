@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1 — 2026-10-24
+
+- 环境安装默认使用国内镜像：Tectonic / Pandoc 优先经 `ghproxy.net`、`gh-proxy.com`、`ghfast.top` 下载，pip 依赖优先用清华、阿里源；失败自动回退官方 GitHub / PyPI。可用 `-OfficialOnly` 强制官方源。
+- `setup.ps1` 控制台输出改用 UTF-8，PowerShell 的中文错误信息不再乱码。
+- 修复 pip 多镜像重试时把 pip 输出当成退出码、导致每个镜像都被误判为失败的问题。
+
 ## 0.4.0 — 2026-10-24
 
 - 首次运行改为在 PDF 翻译面板内一键完成：自动创建 Python 环境、安装依赖并下载 Pandoc / Tectonic，显示阶段、可取消、可重试。

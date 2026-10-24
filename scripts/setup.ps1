@@ -2,12 +2,34 @@ param(
     [string]$Python = '',
     [string]$DataDir = '',
     [switch]$Force,
+    [switch]$OfficialOnly,
     [string]$TectonicUrl = 'https://github.com/tectonic-typesetting/tectonic/releases/download/tectonic%400.17.0/tectonic-0.17.0-x86_64-pc-windows-msvc.zip',
-    [string]$PandocUrl = 'https://github.com/jgm/pandoc/releases/download/3.12.1/pandoc-3.12.1-windows-x86_64.zip'
+    [string]$PandocUrl = 'https://github.com/jgm/pandoc/releases/download/3.12.1/pandoc-3.12.1-windows-x86_64.zip',
+    [string[]]$PipIndexUrls = @('https://pypi.tuna.tsinghua.edu.cn/simple', 'https://mirrors.aliyun.com/pypi/simple/'),
+    [string]$PipFallbackIndexUrl = 'https://pypi.org/simple'
 )
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+try {
+    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+    $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+} catch {}
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}
 $projectRoot = Split-Path $PSScriptRoot -Parent
+
+# GitHub Releases are unreliable from mainland China. Try these public GitHub
+# download proxies first and fall back to the official URL. Pass -OfficialOnly
+# to skip the mirrors.
+$script:MirrorPrefixes = @('https://ghproxy.net/', 'https://gh-proxy.com/', 'https://ghfast.top/')
+
+function Get-CandidateUrls {
+    param([string]$Url)
+    if ($OfficialOnly -or $Url -notmatch '^https://github\.com/') { return @($Url) }
+    $urls = @()
+    foreach ($prefix in $script:MirrorPrefixes) { $urls += ($prefix + $Url) }
+    $urls += $Url
+    return $urls
+}
 
 function Resolve-DataDir {
     param([string]$Requested)
@@ -48,26 +70,38 @@ function Find-BasePython {
 }
 
 function Install-ZipPackage {
-    param([string]$Name, [string]$Url, [string]$Destination, [string]$ExeName)
+    param([string]$Name, [string[]]$Urls, [string]$Destination, [string]$ExeName)
     $existing = Get-ChildItem -LiteralPath $Destination -Filter $ExeName -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($existing) {
         Write-Host "$Name already installed: $($existing.FullName)"
         return
     }
     New-Item -ItemType Directory -Path $Destination -Force | Out-Null
-    $archive = Join-Path ([IO.Path]::GetTempPath()) ("dsh-pdf-$Name-" + [guid]::NewGuid().ToString('N') + '.zip')
-    try {
-        Write-Host "Downloading $Name ..."
-        Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $archive
-        Expand-Archive -LiteralPath $archive -DestinationPath $Destination -Force
-    } catch {
-        throw "Failed to download or extract $Name`: $($_.Exception.Message)`nCheck the network and retry, or download manually: $Url"
-    } finally {
-        if (Test-Path -LiteralPath $archive) { Remove-Item -LiteralPath $archive -Force }
+    $errors = @()
+    for ($index = 0; $index -lt $Urls.Count; $index++) {
+        $url = $Urls[$index]
+        $official = ($index -eq $Urls.Count - 1) -and ($url -match '^https://github\.com/')
+        $timeout = if ($official) { 600 } else { 240 }
+        $archive = Join-Path ([IO.Path]::GetTempPath()) ("dsh-pdf-$Name-" + [guid]::NewGuid().ToString('N') + '.zip')
+        try {
+            Write-Host "Downloading $Name from $url ..."
+            Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $archive -TimeoutSec $timeout
+            Expand-Archive -LiteralPath $archive -DestinationPath $Destination -Force
+            $installed = Get-ChildItem -LiteralPath $Destination -Filter $ExeName -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $installed) { throw "$ExeName was not found after extraction" }
+            Write-Host "$Name installed: $($installed.FullName)"
+            return
+        } catch {
+            $errors += "$url -> $($_.Exception.Message)"
+            Write-Host "Download failed: $($_.Exception.Message)"
+            Remove-Item -LiteralPath $Destination -Recurse -Force -ErrorAction SilentlyContinue
+            New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+        } finally {
+            if (Test-Path -LiteralPath $archive) { Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue }
+        }
     }
-    $installed = Get-ChildItem -LiteralPath $Destination -Filter $ExeName -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
-    if (-not $installed) { throw "$Name installation failed: $ExeName was not found. Check the download URL: $Url" }
-    Write-Host "$Name installed: $($installed.FullName)"
+    throw ("Failed to download or extract $Name. Tried:`n  " + ($errors -join "`n  ") +
+        "`nCheck the network or proxy, retry, or download manually: " + ($Urls -join ', '))
 }
 
 $DataDir = Resolve-DataDir -Requested $DataDir
@@ -92,14 +126,35 @@ if (-not (Test-Path -LiteralPath $venvPython)) {
     }
 }
 
-Write-Host 'Installing Python dependencies ...'
-& $venvPython -m pip install --disable-pip-version-check --no-input --timeout 30 --retries 3 -r (Join-Path $projectRoot 'requirements.txt')
-if ($LASTEXITCODE -ne 0) { throw 'Python dependency installation failed. Check the network or pip configuration.' }
+function Invoke-PipInstall {
+    param([string]$IndexUrl)
+    $pipArgs = @('-m', 'pip', 'install', '--disable-pip-version-check', '--no-input', '--timeout', '30', '--retries', '2')
+    if ($IndexUrl) { $pipArgs += @('-i', $IndexUrl) }
+    $pipArgs += @('-r', (Join-Path $projectRoot 'requirements.txt'))
+    $label = if ($IndexUrl) { $IndexUrl } else { 'the default pip index' }
+    Write-Host "Installing Python dependencies via $label ..."
+    & $venvPython @pipArgs | Out-Host
+    return $LASTEXITCODE
+}
+
+$pipIndexes = @()
+if (-not $OfficialOnly) { $pipIndexes += $PipIndexUrls }
+if ($PipFallbackIndexUrl) { $pipIndexes += $PipFallbackIndexUrl }
+$pipIndexes = @($pipIndexes | Where-Object { $_ } | Select-Object -Unique)
+
+$pipExit = 1
+foreach ($pipIndex in $pipIndexes) {
+    $pipExit = Invoke-PipInstall -IndexUrl $pipIndex
+    if ($pipExit -eq 0) { break }
+    if ($pipIndex -ne $pipIndexes[-1]) { Write-Host "pip mirror failed, trying the next source ..." }
+}
+if ($pipIndexes.Count -eq 0) { $pipExit = Invoke-PipInstall }
+if ($pipExit -ne 0) { throw 'Python dependency installation failed. Check the network or pip configuration.' }
 & $venvPython -c "import pymupdf, bs4" 2>$null
 if ($LASTEXITCODE -ne 0) { throw 'Python dependencies are not importable after installation.' }
 
-Install-ZipPackage -Name 'tectonic' -Url $TectonicUrl -Destination (Join-Path $runtimeDir 'tectonic') -ExeName 'tectonic.exe'
-Install-ZipPackage -Name 'pandoc' -Url $PandocUrl -Destination (Join-Path $runtimeDir 'pandoc') -ExeName 'pandoc.exe'
+Install-ZipPackage -Name 'tectonic' -Urls (Get-CandidateUrls $TectonicUrl) -Destination (Join-Path $runtimeDir 'tectonic') -ExeName 'tectonic.exe'
+Install-ZipPackage -Name 'pandoc' -Urls (Get-CandidateUrls $PandocUrl) -Destination (Join-Path $runtimeDir 'pandoc') -ExeName 'pandoc.exe'
 
 $createdConfig = $false
 if (-not (Test-Path -LiteralPath $configPath)) {

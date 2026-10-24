@@ -46,7 +46,7 @@ npx.cmd @deepseek-ai/dsh plugin --profile web add dsh-pdf-translator
 
 安装并启用插件，重启 Harness 后打开左下角或标题栏的 **PDF 翻译** 面板：
 
-1. 首次会显示「首次使用需要准备运行环境」，点 **一键准备环境**。插件会自动创建 Python 环境、安装依赖并下载 Pandoc / Tectonic（约 300 MB，需要联网），面板显示进度，可取消或重试。
+1. 首次会显示「首次使用需要准备运行环境」，点 **一键准备环境**。插件会自动创建 Python 环境、安装依赖并下载 Pandoc / Tectonic（约 300 MB，需要联网），面板显示进度，可取消或重试。默认优先走国内镜像（`ghproxy.net` / `gh-proxy.com` / `ghfast.top`，pip 用清华 / 阿里源），失败会自动回退官方 GitHub / PyPI。
 2. 就绪后点 **填写模型配置**，填写接口地址、模型名称和 API 密钥并保存。密钥只写入本机 `config.json`，不会上传。
 3. 直接 **选择 PDF** 开始翻译，不需要重启。
 
@@ -56,13 +56,19 @@ npx.cmd @deepseek-ai/dsh plugin --profile web add dsh-pdf-translator
 
 如果自动安装失败（例如无法访问 GitHub 或 pip 源），可以在 PowerShell 中手动执行：
 
-> 安装长时间停在「安装 Python 依赖」通常是 PyPI 或代理不通。可以先配置 pip 镜像再重试：
+> 下载默认使用国内镜像，无需额外配置；也可以显式强制官方源：
 >
 > ```powershell
-> & "$env:USERPROFILE\.dsh\dsh-pdf-translator\.venv\Scripts\python.exe" -m pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
+> & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ExecutionPolicy Bypass -File "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\dsh-pdf-translator\scripts\setup.ps1" -OfficialOnly
 > ```
 >
-> Pandoc / Tectonic 需要访问 GitHub Releases；无法访问时请手动下载后放进 `%USERPROFILE%\.dsh\dsh-pdf-translator\runtime`。
+> 自定义镜像或单独覆盖安装包地址：
+>
+> ```powershell
+> setup.ps1 -PipIndexUrls "https://pypi.tuna.tsinghua.edu.cn/simple" -TectonicUrl "https://..." -PandocUrl "https://..."
+> ```
+>
+> 安装长时间停在某个镜像时，脚本会自动尝试下一个镜像和官方源；全部失败可手动下载后放进 `%USERPROFILE%\.dsh\dsh-pdf-translator\runtime`。
 
 ```powershell
 # 直接调用脚本（推荐，不依赖 powershell 在 PATH 中）
