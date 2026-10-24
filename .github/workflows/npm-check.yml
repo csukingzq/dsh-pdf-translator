@@ -1,0 +1,30 @@
+name: npm auth check
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Check NPM_TOKEN
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::error::NPM_TOKEN is empty"
+            exit 1
+          fi
+          if [ "${NODE_AUTH_TOKEN#npm_}" = "$NODE_AUTH_TOKEN" ]; then
+            echo "::error::NPM_TOKEN does not look like an npm token"
+            exit 1
+          fi
+          npm whoami --registry=https://registry.npmjs.org/
