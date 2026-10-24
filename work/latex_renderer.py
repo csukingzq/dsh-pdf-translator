@@ -56,9 +56,19 @@ def layout_error_context(project, engine_log):
 
 HEADER = r"""
 \usepackage{xeCJK}
-\setCJKmainfont{SimSun}[AutoFakeBold=2]
-\setCJKsansfont{Microsoft YaHei}
-\setCJKmonofont{SimSun}
+% 本机有 Windows 字体时保持原样；Overleaf 等缺少这些字体的环境自动退回
+% TeX Live 自带字体（Fandol、TeX Gyre Termes），因此同一个 main.tex 到处可编译。
+\IfFontExistsTF{Times New Roman}{\setmainfont{Times New Roman}}{%
+  \setmainfont[Extension=.otf,UprightFont=*-regular,BoldFont=*-bold,ItalicFont=*-italic,BoldItalicFont=*-bolditalic]{texgyretermes}}
+\IfFontExistsTF{SimSun}{%
+  \setCJKmainfont[AutoFakeBold=2]{SimSun}%
+  \setCJKsansfont{Microsoft YaHei}%
+  \setCJKmonofont{SimSun}%
+}{%
+  \setCJKmainfont[AutoFakeBold=2,ItalicFont=FandolSong-Regular.otf,BoldItalicFont=FandolSong-Regular.otf]{FandolSong-Regular.otf}%
+  \setCJKsansfont[AutoFakeBold=2,ItalicFont=FandolHei-Regular.otf,BoldItalicFont=FandolHei-Regular.otf]{FandolHei-Regular.otf}%
+  \setCJKmonofont{FandolSong-Regular.otf}%
+}
 \usepackage{amsmath,amssymb,mathtools}
 % bm redefines boldsymbol using legacy mathchar primitives, incompatible
 % with Unicode math. Select Unicode bold italic vector/Greek glyphs directly.
@@ -501,13 +511,17 @@ def build_project(text, source_dir, project):
     font_override = ('\n'+r'\AtBeginDocument{\fontsize{'+str(size)+'pt}{'+str(round(size*1.2,1))+r'pt}\selectfont}') if 'fontSize' in layout else ''
     (project/'layout.tex').write_text(HEADER+font_override, encoding='utf-8')
     tex = run([pandoc, '-f', 'json', '-t', 'latex', '-s', '--pdf-engine=xelatex',
-               '-V', 'mainfont=Times New Roman', '-V', f"fontsize={layout.get('fontSize',11)}pt",
+               '-V', f"fontsize={layout.get('fontSize',11)}pt",
                '-V', 'geometry:margin=24mm', '-V', 'papersize=a4',
                '-V', 'colorlinks=true', '-V', 'linkcolor=black',
                '--include-in-header=layout.tex'], json.dumps(ast), cwd=project)
     tex = break_long_urls(tex)
     (project/'main.tex').write_text(tex, encoding='utf-8')
-    (project/'README.txt').write_text('使用 XeLaTeX 编译 main.tex（两遍），或 tectonic --untrusted main.tex。\n需要 SimSun 和 Microsoft YaHei 中文字体。\n', encoding='utf-8')
+    (project/'README.txt').write_text(
+        '使用 XeLaTeX 编译 main.tex（两遍），或 tectonic --untrusted main.tex。\n'
+        '优先使用 Windows 的宋体（SimSun）和微软雅黑（Microsoft YaHei）；缺少时自动退回 Fandol 字体。\n'
+        '可直接在 Overleaf 选择 XeLaTeX 编译，但需连同 images 目录一起上传。\n',
+        encoding='utf-8')
     return counts
 
 

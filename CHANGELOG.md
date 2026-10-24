@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0 — 2026-10-24
+
+- 输出目录改为每次翻译一个子文件夹，里面只有中文 PDF 和 LaTeX 源码 zip；不再写出 `translated.md`、`crops/`、`document.json`、`layout.json`、`*.report.json` 和 `previews/`。
+- zip 内的工程可直接用 XeLaTeX 或 Tectonic 编译，不包含 `.aux`、`.log`、`main.pdf` 等编译中间产物。
+- 译文、结构数据和报告移入插件数据目录，AI 核验的 `apply` 会同时重新打包 zip，保持 PDF 与源码一致。
+- 缓存清理仍保留已导出的 PDF 和 zip。
+- 生成的 `main.tex` 不再强制使用 Windows 字体：本机有宋体 / Times New Roman 时保持原样，Overleaf 等缺少这些字体的环境自动退回 Fandol / TeX Gyre Termes，整包可直接用 XeLaTeX 编译。
+
 ## 0.2.5 — 2026-10-24
 
 首个面向公众分发的版本。

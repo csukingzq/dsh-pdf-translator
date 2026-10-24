@@ -1,8 +1,8 @@
 import {z} from 'zod';
 
 export function completionPolicy(enabled){return enabled?
-  '先用 pdf_review inspect 读取报告、逐页译文，按需 preview 原文/输出。发现内容或影响可读性的排版问题必须尝试 apply 修复（最多两轮），不能仅以重排差异为由搁置；apply.pages 提交完整替换页，apply.layout 可调整 figureMaxWidth（正文宽度比例）、figureMaxHeight（正文高度比例）或 fontSize（9–14pt）。每次后重新 inspect/preview；无问题即 finish 一次并附 PDF，达到上限或无法修复时说明剩余问题。不要直接改缓存、另起翻译或重复发送完成通知。':
-  'AI 核验关闭。成功后只读取一次 job_output，直接简短回复“翻译完成”并附 output PDF 链接；已有警告仅简短提示。不要列目录、读取译文/报告、渲染预览或重新编译；不可声称内容核验通过。失败/取消如实报告。用户后续明确要求或本轮另有工作时可正常执行其他任务。';}
+  '先用 pdf_review inspect 读取报告、逐页译文，按需 preview 原文/输出。发现内容或影响可读性的排版问题必须尝试 apply 修复（最多两轮），不能仅以重排差异为由搁置；apply.pages 提交完整替换页，apply.layout 可调整 figureMaxWidth（正文宽度比例）、figureMaxHeight（正文高度比例）或 fontSize（9–14pt）。每次后重新 inspect/preview；无问题即 finish 一次并附 output PDF 与 project 压缩包，达到上限或无法修复时说明剩余问题。不要直接改缓存、另起翻译或重复发送完成通知。':
+  'AI 核验关闭。成功后只读取一次 job_output，直接简短回复“翻译完成”并附 output PDF 与 project（LaTeX 源码压缩包）链接；已有警告仅简短提示。不要列目录、读取译文/报告、渲染预览或重新编译；不可声称内容核验通过。失败/取消如实报告。用户后续明确要求或本轮另有工作时可正常执行其他任务。';}
 
 const schema=z.strictObject({jobId:z.string().min(1),action:z.enum(['inspect','preview','apply','finish']),
   version:z.string().optional(),page:z.number().int().positive().optional(),target:z.enum(['source','output']).optional(),

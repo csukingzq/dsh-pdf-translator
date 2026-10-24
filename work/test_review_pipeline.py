@@ -3,6 +3,7 @@ import hashlib
 import json
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -23,27 +24,38 @@ class ReviewTests(unittest.TestCase):
         self.folder.mkdir(parents=True)
         self.output = self.folder/'translated.pdf'
         self.output.write_bytes(self.source.read_bytes())
+        self.archive = self.folder/'translated-latex.zip'
+        self.task = self.root/'work'/'runs'/'task'
         self.cache = self.root/'work'/'document-cache'/'abc'/'model'
         self.cache.mkdir(parents=True)
+        self.markdown = self.cache/'translated.md'
         self.page = {'page':1,'complete':True,'blocks':[{'page':1,'id':'p1-b1','kind':'paragraph','bbox':[0,0,1,1],'markdown':'原始译文','status':'translated'}]}
         doc = {'version':1,'pages':[self.page]}
-        for target in [self.folder/'document.json',self.cache/'rendering.json',self.cache/'document.json',self.cache/'final-pages.json']:
+        for target in [self.task/'document.json',self.cache/'rendering.json',self.cache/'document.json',self.cache/'final-pages.json']:
             review.save(target,doc)
-        (self.folder/'translated.md').write_text('原始译文',encoding='utf-8')
-        self.result = {'output':str(self.output),'document':str(self.folder/'document.json'),
-                       'report':str(self.folder/'translated.report.json'),'markdown':str(self.folder/'translated.md'),
-                       'canonical_document':str(self.cache/'rendering.json')}
-        review.save(Path(self.result['report']),{'status':'complete','issues':[],'source_pages':1})
+        self.markdown.write_text('原始译文',encoding='utf-8')
+        self.result = {'output':str(self.output),'project':str(self.archive),
+                       'document':str(self.task/'document.json'),'report':str(self.task/'report.json'),
+                       'markdown':str(self.markdown),'canonical_document':str(self.cache/'rendering.json')}
+        review.save(self.task/'report.json',{'status':'complete','issues':[],'source_pages':1})
         self.request = {'operation':'review','dataDir':str(self.root),'pdf':str(self.source),
                         'identity':review.digest(self.source)[:16],'result':self.result,'round':1,'remaining':[]}
 
     def invoke(self,action,**kwargs):
         return review.execute({**self.request,'action':action,**kwargs})
 
+    def snapshot(self):
+        return {p:p.read_bytes() for p in self.root.rglob('*') if p.is_file() and 'review-transactions' not in p.parts}
+
+    def archive_text(self,suffix):
+        with zipfile.ZipFile(self.archive) as bundle:
+            name=next(n for n in bundle.namelist() if n.endswith('/'+suffix))
+            return bundle.read(name).decode('utf-8')
+
     def render(self,text,cache,output):
         output.write_bytes(self.source.read_bytes())
         project = output.with_suffix('')
-        project.mkdir()
+        project.mkdir(parents=True, exist_ok=True)
         (project/'main.tex').write_text(text,encoding='utf-8')
         review.save(project/'render-report.json',{})
 
@@ -57,18 +69,19 @@ class ReviewTests(unittest.TestCase):
         for target in [self.result['document'],self.result['canonical_document'],self.cache/'document.json',self.cache/'final-pages.json']:
             self.assertEqual(review.read(target)['pages'][0],revised)
         self.assertIn('修订译文',Path(self.result['markdown']).read_text('utf-8'))
-        self.assertIn('修订译文',(self.output.with_suffix('')/'main.tex').read_text('utf-8'))
+        self.assertIn('修订译文',self.archive_text('main.tex'))
+        self.assertEqual(sorted(p.name for p in self.folder.iterdir()),sorted([self.output.name,self.archive.name]))
         journal=review.read(result['backup'])
         row=next(r for r in journal['files'] if Path(r['target']).resolve()==Path(self.result['document']).resolve())
         self.assertEqual(review.read(Path(result['backup']).parent/row['backup'])['pages'][0],self.page)
         self.assertEqual(review.read(self.result['report'])['ai_review']['rounds'],1)
 
     def test_failed_compile_never_publishes(self):
-        before={p:p.read_bytes() for p in self.folder.rglob('*') if p.is_file()}
+        before=self.snapshot()
         with patch.object(review,'render_latex',side_effect=RuntimeError('compile failed')):
             with self.assertRaisesRegex(RuntimeError,'compile failed'):
                 self.invoke('apply',pages=[self.page])
-        self.assertEqual(before,{p:p.read_bytes() for p in self.folder.rglob('*') if p.is_file()})
+        self.assertEqual(before,self.snapshot())
 
     def test_partial_publication_rolls_back_and_crash_recovery(self):
         transaction=self.root/'work'/'review-transactions'/'test'
@@ -116,8 +129,9 @@ class ReviewTests(unittest.TestCase):
         with pymupdf.open(self.output) as pdf:
             self.assertGreater(len(pdf),0)
             self.assertIn('修订',pdf[0].get_text())
-        self.assertTrue((self.output.with_suffix('')/'main.tex').exists())
-        self.assertIn(r'\fontsize{12pt}',(self.output.with_suffix('')/'layout.tex').read_text('utf-8'))
+        self.assertIn(r'\fontsize{12pt}',self.archive_text('layout.tex'))
+        self.assertIn('修订',self.archive_text('main.tex'))
+        self.assertEqual(sorted(p.name for p in self.folder.iterdir()),sorted([self.output.name,self.archive.name]))
         self.assertEqual(result['result']['status'],'complete')
 
     def test_layout_only_revision_is_versioned_and_reusable(self):
@@ -126,7 +140,7 @@ class ReviewTests(unittest.TestCase):
             result=self.invoke('apply',layout={'figureMaxHeight':.45,'figureMaxWidth':.95})
         self.assertNotEqual(result['version'],version)
         self.assertEqual(review.read(self.result['document'])['pages'],[self.page])
-        for target in [self.folder/'layout.json',self.cache/'layout.json']:
+        for target in [self.cache/'layout.json']:
             self.assertEqual(review.read(target),{'figureMaxHeight':.45,'figureMaxWidth':.95})
         self.assertEqual(review.read(self.result['canonical_document'])['layout']['figureMaxHeight'],.45)
         with self.assertRaisesRegex(ValueError,'排版参数'):

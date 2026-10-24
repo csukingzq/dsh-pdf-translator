@@ -27,8 +27,8 @@ export class CompletionGate {
       state.read.add(a.job_id);return;
     }
     if(exec.name==='pdf_review'&&state.tasks.get(a.jobId)?.aiReview)return;
-    // A Markdown PDF link requires no presentation/file tool.
-    return '本轮仅由 PDF 完成通知触发。每个任务只读取一次 job_output；核验开启时用 pdf_review，否则直接简短回复并附结果中的 PDF 链接。用户新要求和包含其他工作的轮次不受此限制。';
+    // Markdown PDF/zip links require no presentation/file tool.
+    return '本轮仅由 PDF 完成通知触发。每个任务只读取一次 job_output；核验开启时用 pdf_review，否则直接简短回复并附结果中的 PDF 与 LaTeX 压缩包链接。用户新要求和包含其他工作的轮次不受此限制。';
   }
   prompt(owner){
     const state=this.turns.get(owner);

@@ -92,17 +92,10 @@ def execute(request, on_progress=None):
     binaries()  # Fail before spending tokens if the compiler is unavailable.
     data_dir = Path(request.get('dataDir') or ROOT).expanduser().resolve()
     with exclusive(data_dir):
-        output = run_document(source, request.get('pages') or 'all', cfg,
+        return run_document(source, request.get('pages') or 'all', cfg,
             workers=request.get('workers', 4), render_only=request.get('renderOnly', False),
             image_quality=request.get('imageQuality', 'safe'), thinking=request.get('thinking'), data_dir=data_dir,
             output_dir=request.get('outputDir'), on_progress=on_progress)
-    report_path = output.with_suffix('.report.json')
-    report = json.loads(report_path.read_text('utf-8'))
-    return {'output':str(output), 'project':str(output.with_suffix('')), 'report':str(report_path),
-            'markdown':report.get('markdown',str(Path(report['cache'])/'translated.md')), 'status':report['status'],
-            'pages':report['source_pages'], 'usage':report['usage'],
-            'review_blocks':report['source_image_units'], 'issues':report.get('issues', []),
-            'document':report.get('document'), 'canonical_document':report.get('canonical_document')}
 
 
 def main():

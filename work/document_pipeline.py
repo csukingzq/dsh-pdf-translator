@@ -10,6 +10,7 @@ import textwrap
 import threading
 import shutil
 import uuid
+import zipfile
 from functools import lru_cache
 from concurrent.futures import ThreadPoolExecutor, as_completed, wait
 from pathlib import Path
@@ -379,6 +380,28 @@ def save(path, value):
     temp = path.with_suffix(path.suffix+'.tmp')
     temp.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding='utf-8')
     temp.replace(path)
+
+
+# The output folder only ships the PDF and the LaTeX source archive, so the
+# project is compressed without compiler by-products.
+ARCHIVE_SKIPPED_NAMES = {'main.pdf', 'compile.log', 'render-report.json'}
+ARCHIVE_SKIPPED_SUFFIXES = {'.aux', '.log', '.out', '.toc', '.fls', '.fdb_latexmk', '.synctex'}
+
+
+def write_latex_archive(project, archive):
+    """Zip a self-contained LaTeX project under its own folder name."""
+    project, archive = Path(project), Path(archive)
+    if not (project/'main.tex').is_file():
+        raise ValueError('LaTeX 源文件不存在，无法打包：'+str(project))
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    temp = archive.with_name(archive.name+'.tmp')
+    with zipfile.ZipFile(temp, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as bundle:
+        for path in sorted(project.rglob('*')):
+            if not path.is_file() or path.name in ARCHIVE_SKIPPED_NAMES or path.suffix.lower() in ARCHIVE_SKIPPED_SUFFIXES:
+                continue
+            bundle.write(path, (project.name+'/'+path.relative_to(project).as_posix()))
+    temp.replace(archive)
+    return archive
 
 
 def pages_hash(pages):
@@ -951,6 +974,11 @@ def run_document(source, pages_spec, cfg, workers=4, render_only=False,
     run_dir = output_dir/(stem[:48]+'_'+time.strftime('%Y%m%d-%H%M%S')+'_'+uuid.uuid4().hex[:6])
     output = run_dir/f'{stem[:60]}{suffix}_{identity[:6]}_zh.pdf'
     output.parent.mkdir(exist_ok=True)
+    project = output.with_suffix('')
+    archive = project.with_name(project.name+'-latex.zip')
+    # Reviewable task state lives in the data directory; the run folder only
+    # receives the PDF and the LaTeX source archive.
+    task_dir = data_dir.resolve()/'work'/'runs'/run_dir.name
     repairs = saved_rendering.get('repairs',[]) if saved_rendering.get('input_hash') == input_hash else []
     for attempt in range(1+2*sum(len(p['blocks']) for p in pages)):
         emit({'phase':'assembling'})
@@ -993,7 +1021,7 @@ def run_document(source, pages_spec, cfg, workers=4, render_only=False,
         raise RuntimeError('局部修复次数已达上限，未完成输出。')
     fallback = [b['id'] for p in pages for b in p['blocks'] if b.get('status')=='source_image']
     try:
-        rendered = json.loads((output.with_suffix('')/'render-report.json').read_text('utf-8'))
+        rendered = json.loads((project/'render-report.json').read_text('utf-8'))
     except (OSError, ValueError):
         rendered = {}
     layout_warnings = rendered.get('overfull_accepted', [])
@@ -1002,16 +1030,14 @@ def run_document(source, pages_spec, cfg, workers=4, render_only=False,
     save_final_pages(cache, source_hash, pages, review_report, figure_count, None, mode, layout)
     save(rendering_path,{'version':VERSION,'input_hash':input_hash,'pages':pages,'repairs':repairs,'layout':layout})
     emit({'phase':'exporting'})
-    shutil.copyfile(cache/'translated.md', run_dir/'translated.md')
-    if (cache/'crops').exists():
-        shutil.copytree(cache/'crops', run_dir/'crops', dirs_exist_ok=True)
-    shutil.copyfile(cache/'layout.json',run_dir/'layout.json')
-    save(run_dir/'document.json', {'pages':pages, 'repairs':repairs, 'version':VERSION,'layout':layout})
+    # The run folder keeps exactly two files: the PDF and the LaTeX source zip.
+    write_latex_archive(project, archive)
+    shutil.rmtree(project)
     issues = []
     for page in pages:
         for block in page['blocks']:
             if block.get('status') == 'source_image' or any(r['id']==block['id'] for r in repairs):
-                preview = run_dir/'previews'/(block['id']+'.png')
+                preview = cache/'previews'/(block['id']+'.png')
                 preview.parent.mkdir(exist_ok=True)
                 crop(source, block['page']-1, block['bbox'], preview)
                 issues.append({'page':block['page'], 'block':block['id'],
@@ -1022,12 +1048,15 @@ def run_document(source, pages_spec, cfg, workers=4, render_only=False,
         kinds = '、'.join(f'{name} {data["requests"]} 次' for name, data in usage['by_kind'].items())
         print(f"AI 用量：{usage['requests']} 次请求（{kinds}），{usage.get('total_tokens', 0)} tokens"
               f"（其中思考 {usage.get('reasoning_tokens', 0)}）", flush=True)
-    save(output.with_suffix('.report.json'),{'source':str(source),'source_pages':len(pages),'output':str(output),'cache':str(cache),'source_image_units':fallback,'notes_without_marker':dangling,'tags_added':tagged,'bbox_adjusted':adjusted,'repairs':repairs,'ocr':ocr_report,'formula_review':review_report,'ai_figures':figure_count,'usage':usage,'image_quality':image_quality,'thinking':thinking,'offline_review':bool(offline),'layout_warnings':layout_warnings,'translation_seconds':translation_seconds,'total_seconds':round(time.monotonic()-started,2),'status':'needs_review' if fallback or layout_warnings or review_report['unresolved'] or dangling else 'complete'})
-    print(f'完成：{output}\n原图保留内容块：{len(fallback)}',flush=True)
-    report_file = output.with_suffix('.report.json')
-    report = json.loads(report_file.read_text('utf-8'))
-    report.update(layout=layout, markdown=str(run_dir/'translated.md'), document=str(run_dir/'document.json'),
+    report = {'source':str(source),'source_pages':len(pages),'output':str(output),'project':str(archive),'cache':str(cache),'source_image_units':fallback,'notes_without_marker':dangling,'tags_added':tagged,'bbox_adjusted':adjusted,'repairs':repairs,'ocr':ocr_report,'formula_review':review_report,'ai_figures':figure_count,'usage':usage,'image_quality':image_quality,'thinking':thinking,'offline_review':bool(offline),'layout_warnings':layout_warnings,'translation_seconds':translation_seconds,'total_seconds':round(time.monotonic()-started,2),'status':'needs_review' if fallback or layout_warnings or review_report['unresolved'] or dangling else 'complete'}
+    task_document = task_dir/'document.json'
+    report.update(layout=layout, markdown=str(cache/'translated.md'), document=str(task_document),
                   canonical_document=str(rendering_path), issues=issues)
-    save(report_file, report)
+    save(task_document, {'pages':pages, 'repairs':repairs, 'version':VERSION,'layout':layout})
+    save(task_dir/'report.json', report)
+    print(f'完成：{output}\nLaTeX 源码：{archive}\n原图保留内容块：{len(fallback)}',flush=True)
     emit({'phase':'completed'})
-    return output
+    return {'output':str(output), 'project':str(archive), 'report':str(task_dir/'report.json'),
+            'markdown':str(cache/'translated.md'), 'document':str(task_document),
+            'canonical_document':str(rendering_path), 'status':report['status'], 'pages':len(pages),
+            'usage':usage, 'review_blocks':fallback, 'issues':issues, 'layout':layout}

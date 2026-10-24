@@ -10,7 +10,7 @@ import uuid
 from pathlib import Path
 
 import pymupdf
-from document_pipeline import assemble, validate, save
+from document_pipeline import assemble, validate, save, write_latex_archive
 from latex_renderer import render_latex, validate_layout
 
 
@@ -82,9 +82,11 @@ def execute(request):
     result = request['result']
     output = Path(result['output']).resolve()
     folder = output.parent
-    document = within(result['document'], folder)
-    report_path = within(result['report'], folder)
-    markdown = within(result['markdown'], folder)
+    # The run folder only holds the PDF and the LaTeX source zip.
+    archive = within(result['project'], folder)
+    document = within(result['document'], data_dir)
+    report_path = within(result['report'], data_dir)
+    markdown = within(result['markdown'], data_dir)
     canonical = within(result['canonical_document'], data_dir/'work'/'document-cache')
     cache = canonical.parent
     source = Path(request['pdf']).resolve()
@@ -128,7 +130,8 @@ def execute(request):
         return {'version':version,'result':{**result,'status':report['status'],'review':report['ai_review']}}
     if action != 'apply':
         raise ValueError('未知核验操作。')
-    if read(canonical)['pages'] != pages:
+    # A cleared cache cannot still describe this task; the archived source remains the fallback.
+    if canonical.exists() and read(canonical)['pages'] != pages:
         raise ValueError('缓存正式译文与任务版本不一致，停止修复。')
     replacements = request.get('pages') or []
     layout = validate_layout({**doc.get('layout',{}),**(request.get('layout') or {})})
@@ -155,12 +158,13 @@ def execute(request):
     if len(ids) != len(set(ids)):
         raise ValueError('内容块 ID 重复。')
     text = assemble(revised, source, stage)
-    (stage/markdown.name).write_text(text,encoding='utf-8')
+    (stage/'translated.md').write_text(text,encoding='utf-8')
     render_latex(text, stage, stage/output.name)
+    project = stage/output.stem
     with pymupdf.open(stage/output.name) as pdf:
         if not len(pdf) or pdf.needs_pass:
             raise ValueError('修订 PDF 无效。')
-    rendering = read(stage/output.stem/'render-report.json')
+    rendering = read(project/'render-report.json')
     fallback = [b['id'] for p in revised for b in p['blocks'] if b.get('status')=='source_image' or b['kind']=='uncertain']
     report.update(source_image_units=fallback, layout_warnings=rendering.get('overfull_accepted',[]),
                   notes_without_marker=len(rendering.get('unresolved_note_fragments',[])),
@@ -170,9 +174,13 @@ def execute(request):
     doc['pages'] = revised
     doc['layout'] = layout
     report['layout'] = layout
-    save(stage/document.name, doc)
+    # Rebuild the shipped source archive from the same accepted revision.
+    write_latex_archive(project, stage/archive.name)
+    save(stage/'document.json', doc)
     save(stage/report_path.name, report)
-    pairs = [(p,folder/p.relative_to(stage)) for p in stage.rglob('*') if p.is_file()]
+    pairs = [(stage/output.name, output), (stage/archive.name, archive),
+             (stage/'document.json', document), (stage/report_path.name, report_path),
+             (stage/'translated.md', markdown), (stage/'layout.json', cache/'layout.json')]
     # All reusable representations must describe the same accepted revision.
     for target in [canonical,cache/'document.json',cache/'final-pages.json']:
         payload = read(target) if target.exists() else copy.deepcopy(doc)
@@ -181,8 +189,6 @@ def execute(request):
         temp = transaction/('cache-'+target.name)
         save(temp,payload)
         pairs.append((temp,target))
-    pairs.append((stage/markdown.name,cache/'translated.md'))
-    pairs.append((stage/'layout.json',cache/'layout.json'))
     if (stage/'crops').exists():
         pairs.extend((p,cache/'crops'/p.name) for p in (stage/'crops').iterdir() if p.is_file())
     publish(transaction,pairs)

@@ -2,6 +2,8 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+import latex_renderer
 from latex_renderer import build_project, safe_math, render_latex, break_long_urls
 
 
@@ -94,6 +96,37 @@ $$\boldsymbol{\sum_{i=1}^n y_i + \alpha}=\mathbf{A}\boldsymbol{y}$$
             log = (output.with_suffix('')/'main.log').read_text('utf-8')
             self.assertNotIn('Extended mathchar used as mathchar', log)
             self.assertNotIn('Extended mathchar', log)
+
+    def test_generated_preamble_falls_back_to_portable_fonts(self):
+        # Overleaf has neither SimSun nor Times New Roman; the same main.tex must
+        # still compile there by falling back to TeX Live fonts.
+        with tempfile.TemporaryDirectory() as folder:
+            project = Path(folder)
+            build_project('中文测试 $x$', project, project)
+            layout = (project/'layout.tex').read_text('utf-8')
+            tex = (project/'main.tex').read_text('utf-8')
+            self.assertIn(r'\IfFontExistsTF{SimSun}', layout)
+            self.assertIn('FandolSong-Regular.otf', layout)
+            self.assertIn('FandolHei-Regular.otf', layout)
+            self.assertIn(r'\IfFontExistsTF{Times New Roman}', layout)
+            self.assertIn('texgyretermes', layout)
+            self.assertNotIn(r'\setmainfont[]{Times New Roman}', tex)
+            self.assertIn(r'\IfFontExistsTF{SimSun}', tex)
+
+    def test_portable_fonts_compile_without_windows_fonts(self):
+        # Simulate Overleaf: report every Windows font as missing and compile
+        # with the TeX Live fallback fonts only, including emphasis and bold.
+        header = (latex_renderer.HEADER
+                  .replace(r'\IfFontExistsTF{SimSun}', r'\IfFontExistsTF{NoSuchWindowsFont}')
+                  .replace(r'\IfFontExistsTF{Times New Roman}', r'\IfFontExistsTF{NoSuchWindowsFont}'))
+        self.assertNotEqual(header, latex_renderer.HEADER)
+        with tempfile.TemporaryDirectory() as folder, patch.object(latex_renderer, 'HEADER', header):
+            output = Path(folder)/'portable.pdf'
+            latex_renderer.render_latex('中文测试 *强调中文* **粗体中文** English $a^2+b^2=c^2$。', Path(folder), output)
+            self.assertTrue(output.is_file())
+            log = (output.with_suffix('')/'main.log').read_text('utf-8', errors='replace')
+            self.assertNotIn('undefined', log)
+            self.assertNotIn('Missing character', log)
 
     def test_math_file_commands_rejected(self):
         for value in [r'\input{config.json}', r'\csname input\endcsname', r'^^5cinput{x}', r'\write18{cmd}']:

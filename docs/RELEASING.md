@@ -78,4 +78,4 @@ npm publish --access public
 4. 填写模型配置；
 5. 调用 `pdf_translator_doctor`；
 6. 用一页 PDF 做真实翻译（需用户同意，可能产生费用）；
-7. 检查输出 PDF、LaTeX、Markdown 和报告。
+7. 检查输出目录：每次翻译的子文件夹中只有中文 PDF 和 LaTeX 源码 zip；解压 zip 后可独立编译。
