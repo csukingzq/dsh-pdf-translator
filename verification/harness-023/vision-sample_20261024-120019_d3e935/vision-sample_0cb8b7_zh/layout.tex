@@ -1,0 +1,46 @@
+
+\usepackage{xeCJK}
+\setCJKmainfont{SimSun}[AutoFakeBold=2]
+\setCJKsansfont{Microsoft YaHei}
+\setCJKmonofont{SimSun}
+\usepackage{amsmath,amssymb,mathtools}
+% bm redefines boldsymbol using legacy mathchar primitives, incompatible
+% with Unicode math. Select Unicode bold italic vector/Greek glyphs directly.
+\setmathfont{XITSMath-Regular.otf}
+\renewcommand{\boldsymbol}[1]{\symbfit{#1}}
+\providecommand{\bm}[1]{\boldsymbol{#1}}
+\usepackage{newunicodechar}
+\newunicodechar{☐}{\ensuremath{\square}}
+\newunicodechar{★}{\ensuremath{\bigstar}}
+\usepackage{graphicx,adjustbox}
+\usepackage{fancyhdr}
+\usepackage{needspace}
+\usepackage{indentfirst}
+\usepackage{titlesec}
+\titleformat{\section}{\Large\sffamily\bfseries}{}{0pt}{}
+\titleformat{\subsection}{\large\sffamily\bfseries}{}{0pt}{}
+\titleformat{\subsubsection}{\normalsize\sffamily\bfseries}{}{0pt}{}
+\setlength{\parindent}{2em}
+\setlength{\parskip}{0.35em}
+\linespread{1.22}
+\setlength{\emergencystretch}{3em}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyfoot[C]{\small\thepage}
+\renewcommand{\headrulewidth}{0pt}
+\setlength{\headheight}{14pt}
+\widowpenalty=10000
+\clubpenalty=10000
+\setcounter{secnumdepth}{-1}
+\newsavebox{\displaybox}
+\newcommand{\DisplayMath}[2]{%
+  \par\addvspace{0.65\baselineskip}\noindent
+  \sbox{\displaybox}{$\displaystyle #1$}%
+  \ifdim\wd\displaybox>\dimexpr\linewidth-4em\relax
+    \typeout{LATEX-TRANSLATOR: scaled wide display}%
+  \fi
+  \makebox[\linewidth]{%
+    \makebox[\dimexpr\linewidth-4em\relax]{%
+      \adjustbox{max width=\dimexpr\linewidth-4em\relax}{\usebox{\displaybox}}}%
+    \makebox[4em][r]{#2}}%
+  \par\addvspace{0.65\baselineskip}}

@@ -1,0 +1,21 @@
+{
+  "inline_math": 1,
+  "display_math": 0,
+  "images": 1,
+  "notes": 0,
+  "unresolved_note_fragments": [],
+  "anchored_notes": 0,
+  "scaled_displays": 0,
+  "warnings": [
+    "warning: accessing absolute path `C:/WINDOWS/fonts\\timesi.ttf`; build may not be reproducible in other environments",
+    "warning: accessing absolute path `C:/WINDOWS/fonts\\timesbd.ttf`; build may not be reproducible in other environments",
+    "warning: accessing absolute path `C:/WINDOWS/fonts\\times.ttf`; build may not be reproducible in other environments",
+    "warning: accessing absolute path `C:/WINDOWS/fonts\\timesbi.ttf`; build may not be reproducible in other environments",
+    "warning: accessing absolute path `C:/WINDOWS/fonts\\simsun.ttc`; build may not be reproducible in other environments",
+    "warning: accessing absolute path `C:/WINDOWS/fonts\\msyhbd.ttc`; build may not be reproducible in other environments",
+    "warning: accessing absolute path `C:/WINDOWS/fonts\\msyh.ttc`; build may not be reproducible in other environments",
+    "warning: accessing absolute path `C:/WINDOWS/fonts\\msyhl.ttc`; build may not be reproducible in other environments"
+  ],
+  "overfull_boxes_pt": [],
+  "missing_characters": []
+}

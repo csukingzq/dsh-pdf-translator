@@ -1,0 +1,146 @@
+[
+  {
+    "id": "dsh-pdf-translator@0.2.1",
+    "name": "dsh-pdf-translator",
+    "version": "0.2.1",
+    "size": 127773,
+    "unpackedSize": 513915,
+    "shasum": "ba4d707299add850835944187fcbd7e50352558d",
+    "integrity": "sha512-1hLXTAHHJ/RRK9cTsUf7vBXFPHFIaKJvYv+COHGzilUNvhBaByHQnLm4v0naRmQ1C8W5DdTl4T9cZZinkgU6Pw==",
+    "filename": "dsh-pdf-translator-0.2.1.tgz",
+    "files": [
+      {
+        "path": "NOTICE.md",
+        "size": 1134,
+        "mode": 420
+      },
+      {
+        "path": "README.md",
+        "size": 10509,
+        "mode": 420
+      },
+      {
+        "path": "VERIFICATION.md",
+        "size": 3914,
+        "mode": 420
+      },
+      {
+        "path": "config.example.json",
+        "size": 159,
+        "mode": 420
+      },
+      {
+        "path": "cordis.patch.yml",
+        "size": 69,
+        "mode": 420
+      },
+      {
+        "path": "lib/client.js",
+        "size": 351387,
+        "mode": 420
+      },
+      {
+        "path": "package.json",
+        "size": 1783,
+        "mode": 420
+      },
+      {
+        "path": "requirements.txt",
+        "size": 52,
+        "mode": 420
+      },
+      {
+        "path": "scripts/build-client.mjs",
+        "size": 652,
+        "mode": 420
+      },
+      {
+        "path": "scripts/doctor.mjs",
+        "size": 204,
+        "mode": 420
+      },
+      {
+        "path": "scripts/setup.ps1",
+        "size": 1723,
+        "mode": 420
+      },
+      {
+        "path": "scripts/translate.mjs",
+        "size": 597,
+        "mode": 420
+      },
+      {
+        "path": "src/client.jsx",
+        "size": 14348,
+        "mode": 420
+      },
+      {
+        "path": "src/contract.js",
+        "size": 2263,
+        "mode": 420
+      },
+      {
+        "path": "src/index.js",
+        "size": 5528,
+        "mode": 420
+      },
+      {
+        "path": "src/manager.js",
+        "size": 10069,
+        "mode": 420
+      },
+      {
+        "path": "src/panel.css",
+        "size": 3783,
+        "mode": 420
+      },
+      {
+        "path": "src/runner.js",
+        "size": 3977,
+        "mode": 420
+      },
+      {
+        "path": "src/service.js",
+        "size": 2379,
+        "mode": 420
+      },
+      {
+        "path": "src/use-floating-position.js",
+        "size": 3094,
+        "mode": 420
+      },
+      {
+        "path": "work/ai_client.py",
+        "size": 1647,
+        "mode": 420
+      },
+      {
+        "path": "work/cache_ops.py",
+        "size": 4611,
+        "mode": 420
+      },
+      {
+        "path": "work/cli.py",
+        "size": 5585,
+        "mode": 420
+      },
+      {
+        "path": "work/document_pipeline.py",
+        "size": 53853,
+        "mode": 420
+      },
+      {
+        "path": "work/latex_renderer.py",
+        "size": 27357,
+        "mode": 420
+      },
+      {
+        "path": "work/progress.py",
+        "size": 3238,
+        "mode": 420
+      }
+    ],
+    "entryCount": 26,
+    "bundled": []
+  }
+]

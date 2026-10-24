@@ -1,0 +1,134 @@
+{
+  "pages": [
+    {
+      "blocks": [
+        {
+          "kind": "heading",
+          "bbox": [
+            0.09,
+            0.04,
+            0.49,
+            0.07
+          ],
+          "markdown": "# AI 视觉翻译测试",
+          "continues_previous": false,
+          "continues_next": false,
+          "id": "p1-b1",
+          "page": 1,
+          "status": "translated"
+        },
+        {
+          "kind": "paragraph",
+          "bbox": [
+            0.09,
+            0.09,
+            0.71,
+            0.11
+          ],
+          "markdown": "模型必须识别图表、翻译其标签并重建表格。",
+          "continues_previous": false,
+          "continues_next": false,
+          "id": "p1-b2",
+          "page": 1,
+          "status": "translated"
+        },
+        {
+          "kind": "paragraph",
+          "bbox": [
+            0.09,
+            0.12,
+            0.39,
+            0.14
+          ],
+          "markdown": "该关系为线性关系：$y = 2x + 1$。",
+          "continues_previous": false,
+          "continues_next": false,
+          "id": "p1-b3",
+          "page": 1,
+          "status": "translated"
+        },
+        {
+          "kind": "figure",
+          "bbox": [
+            0.11,
+            0.15,
+            0.79,
+            0.53
+          ],
+          "markdown": "纵轴标题：距离（米）；横轴标题：时间（秒）；图例：测量距离；纵轴刻度：0、2、4、6、8；横轴刻度：0、1、2、3、4。",
+          "continues_previous": false,
+          "continues_next": false,
+          "id": "p1-b4",
+          "page": 1,
+          "status": "translated"
+        },
+        {
+          "kind": "paragraph",
+          "bbox": [
+            0.18,
+            0.54,
+            0.45,
+            0.56
+          ],
+          "markdown": "图 1. 匀速运动。",
+          "continues_previous": false,
+          "continues_next": false,
+          "id": "p1-b5",
+          "page": 1,
+          "status": "translated"
+        },
+        {
+          "kind": "paragraph",
+          "bbox": [
+            0.09,
+            0.6,
+            0.43,
+            0.62
+          ],
+          "markdown": "**表 1. 实验观测数据**",
+          "continues_previous": false,
+          "continues_next": false,
+          "id": "p1-b6",
+          "page": 1,
+          "status": "translated"
+        },
+        {
+          "kind": "table",
+          "bbox": [
+            0.09,
+            0.63,
+            0.9,
+            0.75
+          ],
+          "markdown": "| 时间（秒） | 距离（米） | 状态 |\n|---|---|---|\n| 0 | 1 | 初始 |\n| 2 | 5 | 稳定 |",
+          "continues_previous": false,
+          "continues_next": false,
+          "id": "p1-b7",
+          "page": 1,
+          "status": "translated"
+        },
+        {
+          "kind": "paragraph",
+          "bbox": [
+            0.09,
+            0.77,
+            0.5,
+            0.79
+          ],
+          "markdown": "结论：距离随时间稳步增加。",
+          "continues_previous": false,
+          "continues_next": false,
+          "id": "p1-b8",
+          "page": 1,
+          "status": "translated"
+        }
+      ],
+      "complete": true,
+      "page": 1,
+      "signature": "71025f39d185261db71b6684246700c52860ebc212918b3adec0b805a55cee0a",
+      "status": "translated"
+    }
+  ],
+  "repairs": [],
+  "version": "harness-ai-only-v4-panel"
+}

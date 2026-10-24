@@ -1,0 +1,16 @@
+note: Running TeX ...
+note: Rerunning TeX because "main.aux" changed ...
+note: Running xdvipdfmx ...
+note: Writing `main.pdf` (82.26171875 KiB)
+note: Writing `main.log` (49.0732421875 KiB)
+note: Skipped writing 1 intermediate files (use --keep-intermediates to keep them)
+
+Fontconfig error: Cannot load default config file: No such file: (null)
+warning: accessing absolute path `C:/WINDOWS/fonts\timesi.ttf`; build may not be reproducible in other environments
+warning: accessing absolute path `C:/WINDOWS/fonts\timesbd.ttf`; build may not be reproducible in other environments
+warning: accessing absolute path `C:/WINDOWS/fonts\times.ttf`; build may not be reproducible in other environments
+warning: accessing absolute path `C:/WINDOWS/fonts\timesbi.ttf`; build may not be reproducible in other environments
+warning: accessing absolute path `C:/WINDOWS/fonts\simsun.ttc`; build may not be reproducible in other environments
+warning: accessing absolute path `C:/WINDOWS/fonts\msyhbd.ttc`; build may not be reproducible in other environments
+warning: accessing absolute path `C:/WINDOWS/fonts\msyh.ttc`; build may not be reproducible in other environments
+warning: accessing absolute path `C:/WINDOWS/fonts\msyhl.ttc`; build may not be reproducible in other environments

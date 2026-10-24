@@ -1,0 +1,152 @@
+% Options for packages loaded elsewhere
+\PassOptionsToPackage{unicode}{hyperref}
+\PassOptionsToPackage{hyphens}{url}
+\PassOptionsToPackage{dvipsnames,svgnames,x11names}{xcolor}
+\documentclass[
+  11pt,
+  a4paper,
+]{article}
+\usepackage{xcolor}
+\usepackage[margin=24mm]{geometry}
+\usepackage{amsmath,amssymb}
+\setcounter{secnumdepth}{-\maxdimen} % remove section numbering
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \usepackage{textcomp} % provide euro and other symbols
+\else % if luatex or xetex
+  \usepackage{unicode-math} % this also loads fontspec
+  \defaultfontfeatures{Scale=MatchLowercase}
+  \defaultfontfeatures[\rmfamily]{Ligatures=TeX,Scale=1}
+\fi
+\usepackage{lmodern}
+\ifPDFTeX\else
+  % xetex/luatex font selection
+  \setmainfont[]{Times New Roman}
+\fi
+% Use upquote if available, for straight quotes in verbatim environments
+\IfFileExists{upquote.sty}{\usepackage{upquote}}{}
+\IfFileExists{microtype.sty}{% use microtype if available
+  \usepackage[]{microtype}
+  \UseMicrotypeSet[protrusion]{basicmath} % disable protrusion for tt fonts
+}{}
+\makeatletter
+\@ifundefined{KOMAClassName}{% if non-KOMA class
+  \IfFileExists{parskip.sty}{%
+    \usepackage{parskip}
+  }{% else
+    \setlength{\parindent}{0pt}
+    \setlength{\parskip}{6pt plus 2pt minus 1pt}}
+}{% if KOMA class
+  \KOMAoptions{parskip=half}}
+\makeatother
+\usepackage{longtable,booktabs,array}
+\usepackage{caption}
+\captionsetup[table]{skip=6pt}
+\newcounter{none} % for unnumbered tables
+\usepackage{calc} % for calculating minipage widths
+% Correct order of tables after \paragraph or \subparagraph
+\usepackage{etoolbox}
+\makeatletter
+\patchcmd\longtable{\par}{\if@noskipsec\mbox{}\fi\par}{}{}
+\makeatother
+\setlength{\emergencystretch}{3em} % prevent overfull lines
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+
+\usepackage{xeCJK}
+\setCJKmainfont{SimSun}[AutoFakeBold=2]
+\setCJKsansfont{Microsoft YaHei}
+\setCJKmonofont{SimSun}
+\usepackage{amsmath,amssymb,mathtools}
+% bm redefines boldsymbol using legacy mathchar primitives, incompatible
+% with Unicode math. Select Unicode bold italic vector/Greek glyphs directly.
+\setmathfont{XITSMath-Regular.otf}
+\renewcommand{\boldsymbol}[1]{\symbfit{#1}}
+\providecommand{\bm}[1]{\boldsymbol{#1}}
+\usepackage{newunicodechar}
+\newunicodechar{☐}{\ensuremath{\square}}
+\newunicodechar{★}{\ensuremath{\bigstar}}
+\usepackage{graphicx,adjustbox}
+\usepackage{fancyhdr}
+\usepackage{needspace}
+\usepackage{indentfirst}
+\usepackage{titlesec}
+\titleformat{\section}{\Large\sffamily\bfseries}{}{0pt}{}
+\titleformat{\subsection}{\large\sffamily\bfseries}{}{0pt}{}
+\titleformat{\subsubsection}{\normalsize\sffamily\bfseries}{}{0pt}{}
+\setlength{\parindent}{2em}
+\setlength{\parskip}{0.35em}
+\linespread{1.22}
+\setlength{\emergencystretch}{3em}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyfoot[C]{\small\thepage}
+\renewcommand{\headrulewidth}{0pt}
+\setlength{\headheight}{14pt}
+\widowpenalty=10000
+\clubpenalty=10000
+\setcounter{secnumdepth}{-1}
+\newsavebox{\displaybox}
+\newcommand{\DisplayMath}[2]{%
+  \par\addvspace{0.65\baselineskip}\noindent
+  \sbox{\displaybox}{$\displaystyle #1$}%
+  \ifdim\wd\displaybox>\dimexpr\linewidth-4em\relax
+    \typeout{LATEX-TRANSLATOR: scaled wide display}%
+  \fi
+  \makebox[\linewidth]{%
+    \makebox[\dimexpr\linewidth-4em\relax]{%
+      \adjustbox{max width=\dimexpr\linewidth-4em\relax}{\usebox{\displaybox}}}%
+    \makebox[4em][r]{#2}}%
+  \par\addvspace{0.65\baselineskip}}
+\usepackage{bookmark}
+\IfFileExists{xurl.sty}{\usepackage{xurl}}{} % add URL line breaks if available
+\urlstyle{same}
+% fallback for those not using the hyperref driver hyperxmp:
+\makeatletter
+\@ifundefined{xmpquote}{\newcommand{\xmpquote}[1]{#1}}{}
+\makeatother
+\hypersetup{
+  colorlinks=true,
+  linkcolor={black},
+  filecolor={Maroon},
+  citecolor={Blue},
+  urlcolor={Blue},
+  pdfcreator={LaTeX via pandoc}}
+
+\author{}
+\date{}
+
+\begin{document}
+
+\section{AI 视觉翻译测试}\label{ai-ux89c6ux89c9ux7ffbux8bd1ux6d4bux8bd5}
+
+模型必须识别图表、翻译其标签并重建表格。
+
+该关系为线性关系：\typeout{TRANSLATOR-MATH-BEGIN:0}\(y = 2x + 1\)\typeout{TRANSLATOR-MATH-END:0}。
+
+\begin{center}\adjustbox{max width=0.85\linewidth,max height=0.25\textheight}{\includegraphics{images/8f16030f390378d0.png}}\end{center}
+
+纵轴标题：距离（米）；横轴标题：时间（秒）；图例：测量距离；纵轴刻度：0、2、4、6、8；横轴刻度：0、1、2、3、4。
+
+图 1. 匀速运动。
+
+\textbf{表 1. 实验观测数据}
+
+{\def\LTcaptype{none} % do not increment counter
+\begin{longtable}[]{@{}lll@{}}
+\toprule\noalign{}
+时间（秒） & 距离（米） & 状态 \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+0 & 1 & 初始 \\
+2 & 5 & 稳定 \\
+\end{longtable}
+}
+
+结论：距离随时间稳步增加。
+
+\end{document}

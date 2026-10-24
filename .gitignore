@@ -1,0 +1,15 @@
+node_modules/
+.venv/
+runtime/
+config.json
+outputs/
+work/document-cache/
+work/review-transactions/
+work/plugin-state.json
+work/export-roots.json
+.translation.lock
+verification/native-picker/
+verification/live/work/
+__pycache__/
+*.pyc
+*.tgz

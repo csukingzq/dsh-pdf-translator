@@ -1,0 +1,89 @@
+[
+  {
+    "type": "system/message",
+    "turn": 1,
+    "policyPresent": false
+  },
+  {
+    "type": "user/message",
+    "source": "tool-jobs",
+    "form": "notice"
+  },
+  {
+    "type": "user/message",
+    "source": "runtime-context",
+    "form": "snapshot"
+  },
+  {
+    "type": "user/message",
+    "source": "skill-catalog",
+    "form": "catalog"
+  },
+  {
+    "type": "user/message",
+    "source": "time-context",
+    "form": "snapshot"
+  },
+  {
+    "type": "tool/call",
+    "turn": 1,
+    "name": "job_output"
+  },
+  {
+    "type": "system/message",
+    "turn": 1,
+    "policyPresent": true
+  },
+  {
+    "type": "turn/end",
+    "turn": 1
+  },
+  {
+    "type": "system/message",
+    "turn": 2,
+    "policyPresent": false
+  },
+  {
+    "type": "user/message",
+    "source": "tool-jobs",
+    "form": "notice"
+  },
+  {
+    "type": "tool/call",
+    "turn": 2,
+    "name": "job_output"
+  },
+  {
+    "type": "system/message",
+    "turn": 2,
+    "policyPresent": true
+  },
+  {
+    "type": "tool/call",
+    "turn": 2,
+    "name": "pdf_review",
+    "action": "inspect"
+  },
+  {
+    "type": "tool/call",
+    "turn": 2,
+    "name": "pdf_review",
+    "action": "preview"
+  },
+  {
+    "type": "tool/call",
+    "turn": 2,
+    "name": "pdf_review",
+    "action": "preview"
+  },
+  {
+    "type": "tool/call",
+    "turn": 2,
+    "name": "pdf_review",
+    "action": "finish"
+  },
+  {
+    "type": "turn/end",
+    "turn": 2
+  }
+]

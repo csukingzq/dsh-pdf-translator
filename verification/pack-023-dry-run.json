@@ -1,0 +1,181 @@
+[
+  {
+    "id": "dsh-pdf-translator@0.2.3",
+    "name": "dsh-pdf-translator",
+    "version": "0.2.3",
+    "size": 143202,
+    "unpackedSize": 557071,
+    "shasum": "dc04281ea68e0b77c73353a131b78fc8d66986f0",
+    "integrity": "sha512-Vyitemgty1lcxAtGJi0/ro4uR2m/ZqE3VSQIn4eGVfqnHIKdsED75UsyXM1FDpbVw4GNecZbxKhddAo4QvfsAA==",
+    "filename": "dsh-pdf-translator-0.2.3.tgz",
+    "files": [
+      {
+        "path": "NOTICE.md",
+        "size": 1134,
+        "mode": 420
+      },
+      {
+        "path": "README.md",
+        "size": 13134,
+        "mode": 420
+      },
+      {
+        "path": "VERIFICATION.md",
+        "size": 7944,
+        "mode": 420
+      },
+      {
+        "path": "config.example.json",
+        "size": 159,
+        "mode": 420
+      },
+      {
+        "path": "cordis.patch.yml",
+        "size": 69,
+        "mode": 420
+      },
+      {
+        "path": "lib/client.js",
+        "size": 352902,
+        "mode": 420
+      },
+      {
+        "path": "package.json",
+        "size": 2031,
+        "mode": 420
+      },
+      {
+        "path": "requirements.txt",
+        "size": 52,
+        "mode": 420
+      },
+      {
+        "path": "scripts/build-client.mjs",
+        "size": 652,
+        "mode": 420
+      },
+      {
+        "path": "scripts/doctor.mjs",
+        "size": 204,
+        "mode": 420
+      },
+      {
+        "path": "scripts/pick-path.ps1",
+        "size": 3870,
+        "mode": 420
+      },
+      {
+        "path": "scripts/setup.ps1",
+        "size": 1723,
+        "mode": 420
+      },
+      {
+        "path": "scripts/translate.mjs",
+        "size": 597,
+        "mode": 420
+      },
+      {
+        "path": "src/client.jsx",
+        "size": 13513,
+        "mode": 420
+      },
+      {
+        "path": "src/completion-policy.js",
+        "size": 3782,
+        "mode": 420
+      },
+      {
+        "path": "src/contract.js",
+        "size": 2422,
+        "mode": 420
+      },
+      {
+        "path": "src/index.js",
+        "size": 8152,
+        "mode": 420
+      },
+      {
+        "path": "src/manager.js",
+        "size": 12200,
+        "mode": 420
+      },
+      {
+        "path": "src/native-picker.js",
+        "size": 2610,
+        "mode": 420
+      },
+      {
+        "path": "src/page-selection.js",
+        "size": 908,
+        "mode": 420
+      },
+      {
+        "path": "src/panel.css",
+        "size": 4617,
+        "mode": 420
+      },
+      {
+        "path": "src/review.js",
+        "size": 6101,
+        "mode": 420
+      },
+      {
+        "path": "src/runner.js",
+        "size": 3977,
+        "mode": 420
+      },
+      {
+        "path": "src/service.js",
+        "size": 2418,
+        "mode": 420
+      },
+      {
+        "path": "src/session-binding.js",
+        "size": 1684,
+        "mode": 420
+      },
+      {
+        "path": "src/use-floating-position.js",
+        "size": 3210,
+        "mode": 420
+      },
+      {
+        "path": "work/ai_client.py",
+        "size": 1647,
+        "mode": 420
+      },
+      {
+        "path": "work/cache_ops.py",
+        "size": 4611,
+        "mode": 420
+      },
+      {
+        "path": "work/cli.py",
+        "size": 5886,
+        "mode": 420
+      },
+      {
+        "path": "work/document_pipeline.py",
+        "size": 54184,
+        "mode": 420
+      },
+      {
+        "path": "work/latex_renderer.py",
+        "size": 28384,
+        "mode": 420
+      },
+      {
+        "path": "work/progress.py",
+        "size": 3238,
+        "mode": 420
+      },
+      {
+        "path": "work/review_pipeline.py",
+        "size": 9056,
+        "mode": 420
+      }
+    ],
+    "entryCount": 33,
+    "bundled": []
+  }
+]

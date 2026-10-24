@@ -1,0 +1,44 @@
+{
+  "source": "D:\\dsh-pdf-translator\\tests\\fixtures\\vision-sample.pdf",
+  "source_pages": 1,
+  "output": "D:\\dsh-pdf-translator\\verification\\harness-023\\vision-sample_20261024-120132_530740\\vision-sample_0cb8b7_zh.pdf",
+  "cache": "D:\\dsh-pdf-translator\\work\\document-cache\\0cb8b7dffdf661c2\\71025f39d185261d",
+  "source_image_units": [],
+  "notes_without_marker": [],
+  "tags_added": [],
+  "bbox_adjusted": 0,
+  "repairs": [],
+  "ocr": null,
+  "formula_review": {
+    "version": "harness-ai-only-v4-panel",
+    "mode": "ai",
+    "unresolved": 0,
+    "seconds": 0,
+    "limitation": "图表边界、表格结构、图内文字对照均由视觉 AI 识别；原图按 AI 坐标保留。未运行本地 OCR。"
+  },
+  "ai_figures": 1,
+  "usage": {
+    "requests": 0,
+    "by_kind": {}
+  },
+  "image_quality": "safe",
+  "thinking": "auto",
+  "offline_review": false,
+  "layout_warnings": [],
+  "translation_seconds": 0.06,
+  "total_seconds": 7.38,
+  "status": "needs_review",
+  "markdown": "D:\\dsh-pdf-translator\\verification\\harness-023\\vision-sample_20261024-120132_530740\\translated.md",
+  "document": "D:\\dsh-pdf-translator\\verification\\harness-023\\vision-sample_20261024-120132_530740\\document.json",
+  "canonical_document": "D:\\dsh-pdf-translator\\work\\document-cache\\0cb8b7dffdf661c2\\71025f39d185261d\\rendering-5ef5ef03.json",
+  "issues": [],
+  "ai_review": {
+    "status": "finished",
+    "summary": "共 1 页，已逐页对照原文与输出核验：标题、两段正文、公式 y = 2x + 1、图 1 图注、表 1 表题、表格 3 列 2 行数据（时间/距离/状态）以及结论句，译文均与原文一致，图表标签中文对照完整，无遗漏或错译。未提交替换页（无内容需修复）。版面与原稿存在差异：插图被缩放到约原尺寸一半、坐标刻度偏小，表格无边框且列宽较原文窄；这部分属重排版的版式表现，不影响文字内容。",
+    "remaining": [
+      "插图缩放比例偏小，坐标轴刻度（0–8、0–4）可读性低于原稿",
+      "表格为无边框紧凑排布，列宽窄于原稿，与原稿的网格样式不一致"
+    ],
+    "rounds": 0
+  }
+}

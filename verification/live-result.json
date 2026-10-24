@@ -1,0 +1,25 @@
+{
+  "output": "D:\\dsh-pdf-translator\\verification\\live\\outputs\\vision-sample_20261024-101837_1479f3\\vision-sample_0cb8b7_zh.pdf",
+  "project": "D:\\dsh-pdf-translator\\verification\\live\\outputs\\vision-sample_20261024-101837_1479f3\\vision-sample_0cb8b7_zh",
+  "report": "D:\\dsh-pdf-translator\\verification\\live\\outputs\\vision-sample_20261024-101837_1479f3\\vision-sample_0cb8b7_zh.report.json",
+  "markdown": "D:\\dsh-pdf-translator\\verification\\live\\outputs\\vision-sample_20261024-101837_1479f3\\translated.md",
+  "status": "complete",
+  "pages": 1,
+  "usage": {
+    "requests": 1,
+    "prompt_tokens": 2830,
+    "completion_tokens": 472,
+    "total_tokens": 3302,
+    "by_kind": {
+      "page": {
+        "requests": 1,
+        "prompt_tokens": 2830,
+        "completion_tokens": 472,
+        "total_tokens": 3302
+      }
+    }
+  },
+  "review_blocks": [],
+  "issues": [],
+  "document": "D:\\dsh-pdf-translator\\verification\\live\\outputs\\vision-sample_20261024-101837_1479f3\\document.json"
+}

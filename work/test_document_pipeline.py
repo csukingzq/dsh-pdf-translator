@@ -1,0 +1,315 @@
+import json
+import tempfile
+import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
+import pymupdf
+from pathlib import Path
+from document_pipeline import (page_indices, validate, assemble, block_markdown,
+                               page_quality, render_page, record_usage, take_usage, request_page,
+                               split_heading_blocks, normalize_notes, adjust_boxes, check_numbered_equations,
+                               pages_hash, save_final_pages, load_final_pages, thinking_enabled,
+                               run_document, drop_running_headers, merge_adjacent_headings,
+                               merge_bottom_notes, drop_page_footers, api)
+
+
+class StructuredPipelineTests(unittest.TestCase):
+    def setUp(self):
+        guide = patch('document_pipeline.coordinate_reference', return_value=b'guide')
+        guide.start()
+        self.addCleanup(guide.stop)
+
+    def block(self, text, page=1, **extra):
+        return dict(kind='paragraph',bbox=[0.1,0.1,0.9,0.3],markdown=text,page=page,id=f'p{page}-b1',**extra)
+
+    def test_pages(self):
+        self.assertEqual(page_indices('3,1-2,2',5),[0,1,2])
+        for bad in ['0','5-2','6','-1','1,,2']:
+            with self.assertRaises(ValueError):
+                page_indices(bad,5)
+
+    def test_note_correspondence(self):
+        data=dict(complete=True,blocks=[self.block('正文[^1]'),self.block('[^1]: 注释')])
+        validate(data)
+        data['blocks'].pop()
+        with self.assertRaises(ValueError):
+            validate(data)
+
+    def test_invalid_bbox_and_truncation(self):
+        data=dict(complete=True,blocks=[self.block('正文')])
+        data['blocks'][0]['bbox']=[0,0,0,1]
+        with self.assertRaises(ValueError):
+            validate(data)
+        with self.assertRaises(ValueError):
+            validate(dict(complete=False,blocks=[self.block('正文')]))
+
+    def test_unsafe_math_is_rejected(self):
+        with self.assertRaises(ValueError):
+            validate(dict(complete=True,blocks=[self.block(r'$\input{secret}$')]))
+
+    def test_fallback_preserves_footnote_binding(self):
+        with tempfile.TemporaryDirectory() as folder, patch('document_pipeline.crop'):
+            note=self.block('[^2]: 带公式的注释',kind_unused=None)
+            note.update(kind='footnote',status='source_image')
+            text=block_markdown(note,None,Path(folder))
+            self.assertTrue(text.startswith('[^p1-2]: ![]('))
+            paragraph=self.block('正文[^2]',status='source_image')
+            self.assertIn('[^p1-2]',block_markdown(paragraph,None,Path(folder)))
+
+    def test_code_font_preserves_literal_operators(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/'source.pdf'
+            with pymupdf.open() as doc:
+                page=doc.new_page(width=300,height=300)
+                page.insert_text((30,50),'a_b = x*y; result = fun(a_b);',fontname='cour')
+                doc.save(path)
+            block=self.block(r'a\_b = x\*y; result = fun(a\_b);')
+            text=block_markdown(block,path,Path(folder))
+            self.assertTrue(text.startswith('~~~~text'))
+            self.assertIn('a_b = x*y',text)
+
+
+    def test_continuations_and_page_scoped_notes(self):
+        pages=[dict(blocks=[self.block('跨页',continues_next=True)]),
+               dict(blocks=[self.block('段落[^1]。',2,continues_previous=True),self.block('[^1]: 注释',2)])]
+        text=assemble(pages,None,Path('.'))
+        self.assertIn('跨页段落[^p2-1]',text)
+        self.assertIn('[^p2-1]: 注释',text)
+        pages[1]['blocks'][0]['page']=3
+        self.assertIn('跨页\n\n段落',assemble(pages,None,Path('.')))
+
+    def test_footnote_does_not_break_continuation(self):
+        note=self.block('[^1]: 注释')
+        note['kind']='footnote'
+        pages=[dict(blocks=[self.block('跨页[^1]',continues_next=True),note]),
+               dict(blocks=[self.block('段落',2,continues_previous=True)])]
+        self.assertIn('跨页[^p1-1]段落',assemble(pages,None,Path('.')))
+
+    def test_page_quality_and_render_format(self):
+        with tempfile.TemporaryDirectory() as folder:
+            folder=Path(folder)
+            path=folder/'source.pdf'
+            with pymupdf.open() as doc:
+                plain=doc.new_page(width=300,height=300)
+                plain.insert_text((30,50),'ordinary prose without formulas')
+                graphic=doc.new_page(width=300,height=300)
+                for y in range(20,220,8):
+                    graphic.draw_line((20,y),(280,y))
+                doc.save(path)
+            with pymupdf.open(path) as doc:
+                self.assertEqual(page_quality(doc[0]),'normal')
+                self.assertEqual(page_quality(doc[1]),'high')
+                self.assertEqual(render_page(doc[0],folder)[1],'image/jpeg')
+                self.assertEqual(render_page(doc[1],folder)[1],'image/png')
+
+    def test_usage_is_summed_and_cleared(self):
+        take_usage()
+        record_usage({'prompt_tokens':10,'completion_tokens':5,'total_tokens':15}, 'page')
+        record_usage({'prompt_tokens':20,'completion_tokens':7,'total_tokens':27,
+                      'completion_tokens_details':{'reasoning_tokens':3}}, 'formula-review')
+        usage = take_usage()
+        self.assertEqual(usage['requests'],2)
+        self.assertEqual(usage['total_tokens'],42)
+        self.assertEqual(usage['reasoning_tokens'],3)
+        self.assertEqual(usage['by_kind']['page'],
+                         {'requests':1,'prompt_tokens':10,'completion_tokens':5,'total_tokens':15})
+        self.assertEqual(usage['by_kind']['formula-review']['requests'],1)
+        self.assertEqual(take_usage(),{'requests':0,'by_kind':{}})
+
+    def test_thinking_policy(self):
+        self.assertFalse(thinking_enabled('auto',0))
+        self.assertFalse(thinking_enabled('auto',1))
+        self.assertTrue(thinking_enabled('auto',2))
+        self.assertFalse(thinking_enabled('off',2))
+        self.assertTrue(thinking_enabled('on',0))
+
+    def page_response(self, blocks, finish='stop', usage=None):
+        return {'choices':[{'finish_reason':finish,'message':{'content':json.dumps(
+                    {'blocks':blocks, 'complete':True})}}],
+                'usage':usage or {'prompt_tokens':10,'completion_tokens':5,'total_tokens':15}}
+
+
+    def test_page_request_can_keep_reasoning(self):
+        llm = SimpleNamespace(base_url='https://example.invalid/v1', api_key='k', model='m')
+        block = {'kind':'paragraph','bbox':[.1,.1,.9,.2],'markdown':'译文'}
+        with patch('document_pipeline.api.json_request',
+                   return_value=self.page_response([block])) as call:
+            request_page(llm,b'img','','',thinking=True)
+        self.assertNotIn('reasoning_effort',call.call_args.kwargs['payload'])
+
+    def test_endpoint_without_reasoning_switch_still_works(self):
+        llm = SimpleNamespace(base_url='https://example.invalid/v1', api_key='k', model='m')
+        block = {'kind':'paragraph','bbox':[.1,.1,.9,.2],'markdown':'译文'}
+        error = api.PipelineError('unsupported field', status=400)
+        with patch('document_pipeline.api.json_request',
+                   side_effect=[error,self.page_response([block])]) as call:
+            data = request_page(llm,b'img','','',thinking=False)
+        self.assertEqual(call.call_count,2)
+        self.assertIn('reasoning_effort',call.call_args_list[0].kwargs['payload'])
+        self.assertNotIn('reasoning_effort',call.call_args_list[1].kwargs['payload'])
+        self.assertNotIn('max_tokens',call.call_args_list[1].kwargs['payload'])
+        self.assertTrue(data['complete'])
+
+    def test_merged_headings_are_split(self):
+        data = {'complete':True,'blocks':[{'kind':'heading','bbox':[.1,.1,.9,.2],
+                'markdown':'# 第 7 章\n## 常微分方程','continues_previous':False,'continues_next':False}]}
+        blocks = split_heading_blocks(data)['blocks']
+        self.assertEqual([b['markdown'] for b in blocks],['# 第 7 章','## 常微分方程'])
+        self.assertEqual({b['bbox'][0] for b in blocks},{.1})
+
+    def test_dropped_equation_number_is_attached_from_layout(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)/'source.pdf'
+            with pymupdf.open() as doc:
+                page = doc.new_page(width=400,height=400)
+                page.insert_text((300,200),'(7.1)')
+                doc.save(path)
+            data = {'complete':True,'blocks':[{'kind':'equation','bbox':[.1,.45,.9,.55],
+                    'markdown':'$$x=1$$'}]}
+            check_numbered_equations(path,0,data)
+            self.assertTrue(data['blocks'][0]['markdown'].endswith(r'\tag{7.1}$$'))
+            self.assertEqual(data['tags_added'],['7.1'])
+            # An extra tagless display on the same line makes the target ambiguous.
+            ambiguous = {'complete':True,'blocks':[
+                {'kind':'equation','bbox':[.1,.45,.9,.55],'markdown':'$$x=1$$'},
+                {'kind':'equation','bbox':[.1,.45,.9,.55],'markdown':'$$y=2$$'}]}
+            with self.assertRaises(ValueError):
+                check_numbered_equations(path,0,ambiguous)
+
+    def test_boxes_at_or_past_the_page_edge_are_clamped(self):
+        data = {'complete':True,'blocks':[
+            {'kind':'equation','bbox':[.15,1.0,.85,1.0],'markdown':'$$x$$'},
+            {'kind':'paragraph','bbox':[.1,1.01,.9,1.06],'markdown':'正文'},
+            {'kind':'figure','bbox':[.1,1.0,.9,1.0],'markdown':''}]}
+        data = adjust_boxes(data)
+        self.assertEqual(data['bbox_adjusted'],2)
+        for block in data['blocks'][:2]:
+            self.assertLess(block['bbox'][1],block['bbox'][3])
+        self.assertEqual(data['blocks'][2]['bbox'],[.1,1.0,.9,1.0])
+        with self.assertRaises(ValueError):
+            validate(data)
+
+    def test_bottom_note_fragments_are_grouped_into_footnote(self):
+        page = {'page':1,'blocks':[
+            {'kind':'heading','bbox':[.1,.1,.9,.2],'markdown':'# 标题*'},
+            {'kind':'paragraph','bbox':[.1,.2,.9,.22],'markdown':'作者 A$^{\\dagger}$，B$^{\\ddagger}$'},
+            {'kind':'paragraph','bbox':[.1,.7,.9,.73],'markdown':'* 2023 年收到稿。'},
+            {'kind':'paragraph','bbox':[.1,.73,.9,.76],'markdown':'**资助：** 基金。'},
+            {'kind':'paragraph','bbox':[.1,.76,.9,.8],'markdown':'$^{\\dagger}$ 单位 A。'},
+            {'kind':'paragraph','bbox':[.1,.95,.9,.97],'markdown':'版权所有 ©。'}]}
+        merge_bottom_notes(page)
+        self.assertEqual([block['kind'] for block in page['blocks']],
+                         ['heading','paragraph','footnote','paragraph'])
+        self.assertFalse(page['blocks'][0]['markdown'].endswith('*'))
+        self.assertIn('[^',page['blocks'][1]['markdown'])
+        self.assertIn('2023',page['blocks'][2]['markdown'])
+        self.assertIn('资助',page['blocks'][2]['markdown'])
+        self.assertIn('单位 A',page['blocks'][2]['markdown'])
+        self.assertIn('版权所有',page['blocks'][3]['markdown'])
+
+    def test_copyright_footer_is_dropped_from_body(self):
+        pages = [{'page':1,'blocks':[
+            {'kind':'paragraph','bbox':[.1,.2,.9,.3],'markdown':'正文'},
+            {'kind':'paragraph','bbox':[.1,.95,.9,.97],'markdown':'版权所有 © 由 SIAM 持有。'}]}]
+        drop_page_footers(pages)
+        self.assertEqual(len(pages[0]['blocks']),1)
+
+    def test_unmarked_bottom_note_becomes_page_note(self):
+        page = {'page':2,'blocks':[
+            {'kind':'paragraph','bbox':[.1,.7,.9,.8],'markdown':'† 单位 A。'}]}
+        merge_bottom_notes(page)
+        self.assertTrue(page['blocks'][0]['markdown'].startswith('::: {.translation-note}'))
+
+    def test_symbol_note_is_anchored_to_author_line(self):
+        data = {'complete':True,'blocks':[
+            {'kind':'paragraph','bbox':[.1,.2,.9,.22],'markdown':'A. Author, B. Author*'},
+            {'kind':'footnote','bbox':[.1,.9,.9,.95],'markdown':'[^1]: * Corresponding author.'},
+            {'kind':'paragraph','bbox':[.1,.3,.9,.32],'markdown':'*Affiliation*'}]}
+        data = normalize_notes(data)
+        self.assertEqual(data['blocks'][0]['markdown'],'A. Author, B. Author[^1]')
+        self.assertEqual(data['blocks'][1]['kind'],'footnote')
+        self.assertEqual(data['blocks'][1]['markdown'],'[^1]: Corresponding author.')
+        self.assertNotIn('dangling_notes', data)
+
+    def test_note_without_marker_is_kept_as_body_text(self):
+        data = {'complete':True,'blocks':[
+            {'kind':'paragraph','bbox':[.1,.1,.9,.2],'markdown':'正文[^1]'},
+            {'kind':'footnote','bbox':[.1,.9,.9,.95],'markdown':'[^1]: 有标记的注释'},
+            {'kind':'footnote','bbox':[.1,.95,.9,.97],'markdown':'[^2]: 参考文献'},
+            {'kind':'footnote','bbox':[.1,.97,.9,.99],'markdown':'[^3]: '}]}
+        blocks = normalize_notes(data)['blocks']
+        self.assertEqual(len(blocks),3)
+        self.assertEqual(blocks[1]['kind'],'footnote')
+        self.assertEqual(blocks[2]['kind'],'paragraph')
+        self.assertEqual(blocks[2]['markdown'],'参考文献')
+        self.assertEqual(data['dangling_notes'],['2'])
+        validate(data)
+
+    def test_final_pages_cache_round_trip_and_mismatch(self):
+        with tempfile.TemporaryDirectory() as folder:
+            cache = Path(folder)
+            pages = [{'page':1,'blocks':[self.block('译文')]}]
+            fingerprint = pages_hash(pages)
+            save_final_pages(cache, fingerprint, pages, {'unresolved':0}, 2, {'tier':'standard'}, 'local')
+            loaded = load_final_pages(cache, fingerprint, 'local')
+            self.assertEqual(loaded['pages'], pages)
+            self.assertEqual(loaded['local_images'], 2)
+            self.assertIsNone(load_final_pages(cache, fingerprint, 'ai'))
+            self.assertIsNone(load_final_pages(cache, 'other', 'local'))
+            (cache/'final-pages.json').write_text('{broken', encoding='utf-8')
+            self.assertIsNone(load_final_pages(cache, fingerprint, 'local'))
+
+    def test_running_header_is_dropped_but_real_heading_kept(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)/'source.pdf'
+            with pymupdf.open() as doc:
+                page = doc.new_page(width=400, height=600)
+                page.insert_text((40,30),'1.2 Machine Arithmetic',fontsize=8)
+                page.insert_text((40,100),'body text '*20,fontsize=11)
+                doc.save(path)
+            pages = [{'page':1,'blocks':[
+                {'kind':'heading','bbox':[.1,.02,.6,.06],'markdown':'# 1.2 机器算术'},
+                {'kind':'paragraph','bbox':[.1,.1,.9,.3],'markdown':'正文'}]}]
+            drop_running_headers(path,pages)
+            self.assertEqual([block['kind'] for block in pages[0]['blocks']],['paragraph'])
+            plain = [{'page':1,'blocks':[
+                {'kind':'heading','bbox':[.1,.02,.6,.06],'markdown':'# 1.2 机器算术'}]}]
+            with pymupdf.open() as doc:
+                doc.new_page(width=400,height=600).insert_text((40,100),'body text '*20,fontsize=11)
+                doc.save(path)
+            drop_running_headers(path,plain)
+            self.assertEqual(len(plain[0]['blocks']),1)
+
+    def test_split_two_line_heading_is_merged(self):
+        page = {'page':2,'blocks':[
+            {'kind':'heading','page':2,'bbox':[.1,.5,.9,.56],'markdown':'### 1.2.2 误差传播：'},
+            {'kind':'heading','page':2,'bbox':[.1,.5,.9,.56],'markdown':'### 抵消误差'},
+            {'kind':'paragraph','page':2,'bbox':[.1,.6,.9,.7],'markdown':'正文'}]}
+        merge_adjacent_headings(page)
+        self.assertEqual([block['kind'] for block in page['blocks']],['heading','paragraph'])
+        self.assertEqual(page['blocks'][0]['markdown'],'### 1.2.2 误差传播：抵消误差')
+        separate = {'page':2,'blocks':[
+            {'kind':'heading','page':2,'bbox':[.1,.5,.9,.56],'markdown':'### 小节'},
+            {'kind':'heading','page':2,'bbox':[.1,.6,.9,.66],'markdown':'### 另一个'}]}
+        merge_adjacent_headings(separate)
+        self.assertEqual(len(separate['blocks']),2)
+
+
+
+    def test_ai_first_pass_still_receives_no_extracted_text(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root/'source.pdf'
+            with pymupdf.open() as doc:
+                doc.new_page().insert_text((72,72),'WRONG extracted formula reference')
+                doc.save(source)
+            response = {'complete':True,'blocks':[{'kind':'paragraph',
+                        'bbox':[.1,.1,.9,.2],'markdown':'译文'}]}
+            from document_pipeline import process_page
+            with patch('document_pipeline.request_page',return_value=response) as request:
+                process_page(source,0,root/'cache',None,'test',1)
+            self.assertEqual(request.call_args.args[2:4],('', ''))
+
+
+if __name__=='__main__':
+    unittest.main()

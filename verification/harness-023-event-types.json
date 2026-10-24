@@ -1,0 +1,215 @@
+[
+  {
+    "type": "session"
+  },
+  {
+    "type": "permission/preset"
+  },
+  {
+    "type": "sandbox/mode"
+  },
+  {
+    "type": "approval/policy"
+  },
+  {
+    "type": "job/registered"
+  },
+  {
+    "type": "job/settled"
+  },
+  {
+    "type": "agent/inbox/spliced"
+  },
+  {
+    "type": "turn/start"
+  },
+  {
+    "type": "agent/inbox/spliced"
+  },
+  {
+    "type": "step/start"
+  },
+  {
+    "type": "system/message"
+  },
+  {
+    "type": "user/message"
+  },
+  {
+    "type": "user/message"
+  },
+  {
+    "type": "user/message"
+  },
+  {
+    "type": "user/message"
+  },
+  {
+    "type": "request/header"
+  },
+  {
+    "type": "request/context"
+  },
+  {
+    "type": "session-log-deepseek/delivery-accepted"
+  },
+  {
+    "type": "assistant/message"
+  },
+  {
+    "type": "tool/call"
+  },
+  {
+    "type": "tool/result"
+  },
+  {
+    "type": "step/end"
+  },
+  {
+    "type": "step/start"
+  },
+  {
+    "type": "system/message"
+  },
+  {
+    "type": "session-log-deepseek/delivery-accepted"
+  },
+  {
+    "type": "assistant/message"
+  },
+  {
+    "type": "step/end"
+  },
+  {
+    "type": "turn/end"
+  },
+  {
+    "type": "job/registered"
+  },
+  {
+    "type": "job/settled"
+  },
+  {
+    "type": "agent/inbox/spliced"
+  },
+  {
+    "type": "turn/start"
+  },
+  {
+    "type": "agent/inbox/spliced"
+  },
+  {
+    "type": "step/start"
+  },
+  {
+    "type": "system/message"
+  },
+  {
+    "type": "user/message"
+  },
+  {
+    "type": "session-log-deepseek/delivery-accepted"
+  },
+  {
+    "type": "assistant/message"
+  },
+  {
+    "type": "tool/call"
+  },
+  {
+    "type": "tool/result"
+  },
+  {
+    "type": "step/end"
+  },
+  {
+    "type": "step/start"
+  },
+  {
+    "type": "system/message"
+  },
+  {
+    "type": "session-log-deepseek/delivery-accepted"
+  },
+  {
+    "type": "assistant/message"
+  },
+  {
+    "type": "tool/call"
+  },
+  {
+    "type": "tool/result"
+  },
+  {
+    "type": "step/end"
+  },
+  {
+    "type": "step/start"
+  },
+  {
+    "type": "session-log-deepseek/delivery-accepted"
+  },
+  {
+    "type": "assistant/message"
+  },
+  {
+    "type": "tool/call"
+  },
+  {
+    "type": "tool/result"
+  },
+  {
+    "type": "step/end"
+  },
+  {
+    "type": "step/start"
+  },
+  {
+    "type": "session-log-deepseek/delivery-accepted"
+  },
+  {
+    "type": "assistant/message"
+  },
+  {
+    "type": "tool/call"
+  },
+  {
+    "type": "tool/result"
+  },
+  {
+    "type": "step/end"
+  },
+  {
+    "type": "step/start"
+  },
+  {
+    "type": "session-log-deepseek/delivery-accepted"
+  },
+  {
+    "type": "assistant/message"
+  },
+  {
+    "type": "tool/call"
+  },
+  {
+    "type": "tool/result"
+  },
+  {
+    "type": "step/end"
+  },
+  {
+    "type": "step/start"
+  },
+  {
+    "type": "session-log-deepseek/delivery-accepted"
+  },
+  {
+    "type": "assistant/message"
+  },
+  {
+    "type": "step/end"
+  },
+  {
+    "type": "turn/end"
+  }
+]
