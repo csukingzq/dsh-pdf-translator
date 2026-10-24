@@ -22,17 +22,38 @@
 
 ## 安装
 
-### 桌面版
+### 方式一：npm（推荐）
+
+npm 包地址：<https://www.npmjs.com/package/dsh-pdf-translator>
+
+桌面版：
 
 1. 打开 DSH，点击 **插件 → 添加插件**。
 2. 输入 `dsh-pdf-translator`，点击 **安装**，然后 **立即启用**。
-3. 打开 PowerShell 安装运行环境（把 `desktop` 换成实际 profile 名）：
+
+CLI：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\dsh-pdf-translator\scripts\setup.ps1"
+npx.cmd @deepseek-ai/dsh plugin --profile web add dsh-pdf-translator
 ```
 
-4. 编辑模型配置：
+### 方式二：GitHub Release
+
+下载 [dsh-pdf-translator.tgz](https://github.com/csukingzq/dsh-pdf-translator/releases/latest/download/dsh-pdf-translator.tgz)，在 **插件 → 添加插件** 中选择该文件。
+
+### 首次运行环境
+
+安装插件后，打开 PowerShell 执行对应 profile 的环境安装脚本：
+
+```powershell
+# 桌面版
+powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\dsh-pdf-translator\scripts\setup.ps1"
+
+# Web / CLI
+powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\.dsh\profiles\web\node_modules\dsh-pdf-translator\scripts\setup.ps1"
+```
+
+然后编辑模型配置：
 
 ```text
 %USERPROFILE%\.dsh\dsh-pdf-translator\config.json
@@ -48,18 +69,7 @@ powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\.dsh\profiles\desktop
 }
 ```
 
-5. 新建聊天，发送「调用 pdf_translator_doctor 检查 PDF 翻译插件环境」。
-
-### 从 GitHub Release 安装
-
-下载 [dsh-pdf-translator.tgz](https://github.com/csukingzq/dsh-pdf-translator/releases/latest/download/dsh-pdf-translator.tgz)，在 **插件 → 添加插件** 中选择该文件。后续运行环境步骤同上。
-
-### Web / CLI
-
-```powershell
-npx.cmd @deepseek-ai/dsh plugin --profile web add dsh-pdf-translator
-powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\.dsh\profiles\web\node_modules\dsh-pdf-translator\scripts\setup.ps1"
-```
+最后新建聊天，发送「调用 pdf_translator_doctor 检查 PDF 翻译插件环境」。
 
 ## 使用
 
