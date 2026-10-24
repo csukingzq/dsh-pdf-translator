@@ -9,7 +9,7 @@
 - **Node 测试 24 项全部通过**（含新增 paths 解析测试），使用真实 Cordis/ToolRuntime/JobRegistry/Gateway 与已打包前端。
 - **Python 测试 56 项全部通过**，含真实 Tectonic 编译；测试临时目录使用工作区内路径。
 - `npm run build`、`npm run check` 通过。
-- `npm pack` 生成 `dsh-pdf-translator-0.2.5.tgz`：36 个文件，150.2 kB；`scripts/verify-package.mjs` 校验通过，包内无 `.venv`、`runtime`、`config.json`、缓存、输出、密钥或测试临时文件。
+- `npm pack` 生成 `dsh-pdf-translator-0.2.5.tgz`：36 个文件，146.0 kB；`scripts/verify-package.mjs` 校验通过，包内无 `.venv`、`runtime`、`config.json`、缓存、输出、密钥或测试临时文件。
 - 在隔离数据目录实测 `setup.ps1`：能使用 DSH 桌面自带 Python 创建 `.venv`，pip 安装 PyMuPDF/bs4，成功下载并解压 Tectonic 0.17.0 与 Pandoc 3.12.1，首次生成 `config.json`；`pdf_translator_doctor` 返回的 Python、Pandoc、Tectonic、配置和路径均正确。
 - 本次未调用收费模型，未清理用户缓存；真实一页模型验收留到公开发布前由用户确认后执行。
 
