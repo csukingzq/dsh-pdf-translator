@@ -74,8 +74,13 @@ jobs:
           generate_release_notes: true
 
       - name: Publish to npm
-        if: env.NODE_AUTH_TOKEN != ''
+        if: startsWith(env.NODE_AUTH_TOKEN, 'npm_')
         shell: powershell
         run: |
           $tarball = (Resolve-Path "dist/dsh-pdf-translator-$env:VERSION.tgz").Path
           npm publish "$tarball" --provenance --access public --registry https://registry.npmjs.org/
+
+      - name: Note missing npm token
+        if: ${{ !startsWith(env.NODE_AUTH_TOKEN, 'npm_') }}
+        shell: powershell
+        run: Write-Host '::warning::NPM_TOKEN is not a valid npm token; GitHub Release was created, npm was not published.'
