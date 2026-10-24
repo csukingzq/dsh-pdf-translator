@@ -19,6 +19,9 @@ export class TranslatorService extends TypertRemoteService {
       const r=requestSchema.parse(input), m=this.manager;
       switch(r.action){
         case 'status':return await m.status(r.sessionId);
+        case 'setupStart':return await m.setupStart();
+        case 'setupCancel':return await m.setupCancel();
+        case 'saveConfig':return await m.saveConfig(r);
         case 'inspect':return await m.inspect({pdf:r.pdf,pages:r.pages});
         case 'browse':return await m.browse(r.path,r.directories);
         case 'pick':return await m.pick(r.kind);

@@ -93,7 +93,7 @@ if (-not (Test-Path -LiteralPath $venvPython)) {
 }
 
 Write-Host 'Installing Python dependencies ...'
-& $venvPython -m pip install --disable-pip-version-check -r (Join-Path $projectRoot 'requirements.txt')
+& $venvPython -m pip install --disable-pip-version-check --no-input --timeout 30 --retries 3 -r (Join-Path $projectRoot 'requirements.txt')
 if ($LASTEXITCODE -ne 0) { throw 'Python dependency installation failed. Check the network or pip configuration.' }
 & $venvPython -c "import pymupdf, bs4" 2>$null
 if ($LASTEXITCODE -ne 0) { throw 'Python dependencies are not importable after installation.' }

@@ -25,9 +25,11 @@ test('built panel: native selection, confirmation, validation, defaults, backgro
   vm.runInThisContext(await fs.readFile(new URL('../lib/client.js',import.meta.url),'utf8'));
   const store=bundle.createPanelState();store.set({sessionId:'s'});
   const requests=[];let tasks=[],outputDir='D:\\默认输出',pick={cancelled:false,path:'D:\\资料\\论文.pdf'},pickError=false,aiReview=false,created=0;
+  const readySetup={ready:true,running:false,platform:'win32',platformOk:true,phase:'done',message:'',error:'',configError:'',elapsedSeconds:0,log:[],
+    missing:{python:false,runtime:false,config:false,model:false},config:{baseUrl:'https://api.example.com/v1',model:'vision',hasApiKey:true}};
   const call=async r=>{
     requests.push(r);
-    if(r.action==='status')return {tasks,outputDir,aiReview,configured:true,busy:tasks.some(t=>['running','stopping'].includes(t.status))};
+    if(r.action==='status')return {tasks,outputDir,aiReview,configured:true,setup:readySetup,busy:tasks.some(t=>['running','stopping'].includes(t.status))};
     if(r.action==='pick'){if(pickError)throw Error('系统窗口不可用');return pick;}
     if(r.action==='inspect')return {path:r.pdf,pages:8,bytes:1024};
     if(r.action==='settings'){outputDir=r.outputDir??outputDir;aiReview=r.aiReview??aiReview;return {outputDir,aiReview,configured:true};}
@@ -43,7 +45,7 @@ test('built panel: native selection, confirmation, validation, defaults, backgro
   try{
     click('PDF 翻译');await act(async()=>{});
     assert.equal(view.container.querySelector('.pdf-entry').hidden,true);
-    assert.equal(view.container.querySelectorAll('.pdf-actions button').length,3);
+    assert.equal(view.container.querySelectorAll('.pdf-actions button').length,4);
     assert.equal(view.getByRole('switch',{name:'AI 核验'}).checked,false);
     await choose();assert.equal(view.getByLabelText('翻译页码').value,'全部');
     assert.equal(requests.some(r=>r.action==='start'),false);

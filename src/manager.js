@@ -7,6 +7,7 @@ import { resolveDataDir } from './paths.js';
 import { translateSchema } from './contract.js';
 import {pickNative} from './native-picker.js';
 import {ReviewController, completionPolicy} from './review.js';
+import {SetupController} from './setup.js';
 
 const activeStates = new Set(['preparing', 'running', 'stopping']);
 const phases = {preparing:'准备', recognizing:'AI 识别与翻译', validating:'校验译文', assembling:'组装译文', compiling:'编译 PDF', exporting:'导出成果', completed:'完成'};
@@ -14,7 +15,7 @@ export function progressText(p) {
   return `${phases[p.phase] || p.phase} · ${p.completed || 0}/${p.total || 0} 页 · 缓存 ${p.cached || 0} 页`;
 }
 export class TranslatorManager {
-  constructor(ctx, config = {}, runner = runPython, picker = pickNative) {
+  constructor(ctx, config = {}, runner = runPython, picker = pickNative, setup = null) {
     this.ctx=ctx; this.config=config; this.runner=runner;
     this.dataDir=path.resolve(resolveDataDir(config));
     this.stateFile=path.join(this.dataDir,'work','plugin-state.json');
@@ -23,6 +24,7 @@ export class TranslatorManager {
     this.panelRequests=new Map();
     this.picker=picker; this.pickerController=null;
     this.review=new ReviewController(this);
+    this.setup=setup || new SetupController(config,{dataDir:this.dataDir});
     this.writeChain=Promise.resolve(); this.ready=this.load();
     // Keep errors available to panel operations without an unhandled Host rejection.
     this.ready.catch(()=>{});
@@ -64,8 +66,14 @@ export class TranslatorManager {
     if(value.aiReview!==undefined)this.state.aiReview=value.aiReview===true;
     await this.persist();return {outputDir:this.state.outputDir,configured:this.state.configured,aiReview:this.state.aiReview};}
   async status(owner){await this.ready;return {outputDir:this.state.outputDir,configured:this.state.configured,
-    aiReview:this.state.aiReview,busy:Boolean(this.busy||this.active||this.review.active()),panelRequest:this.panelRequests.get(owner)||null,
+    aiReview:this.state.aiReview,setup:this.setup.snapshot(),
+    busy:Boolean(this.busy||this.active||this.review.active()||this.setup.running),panelRequest:this.panelRequests.get(owner)||null,
     tasks:this.state.tasks.filter(t=>t.owner===owner).slice(-20).reverse()};}
+  async setupStart(){await this.ready;if(this.closed)throw new Error('插件正在关闭。');
+    if(this.active||this.busy||this.review.active())throw new Error('翻译或核验任务运行中，暂不能准备环境。');
+    return this.setup.start();}
+  async setupCancel(){await this.ready;return this.setup.cancel();}
+  async saveConfig(input){await this.ready;if(this.closed)throw new Error('插件正在关闭。');return this.setup.saveConfig(input);}
   panel(owner, section='translation', visible=true){
     if(!owner)throw new Error('请在当前会话中打开面板。');
     this.panelRequests.set(owner,{id:randomUUID(),section,visible});
@@ -88,7 +96,11 @@ export class TranslatorManager {
       if(this.active.owner===owner) return {background:true,jobId:this.active.id,existing:true};
       throw new Error('已有其他会话的翻译任务运行，请等待完成。');
     }
-    if(this.busy||this.review.active()) throw new Error('正在准备任务、核验或清理缓存，请稍后再试。');
+    if(this.busy||this.review.active()||this.setup.running) throw new Error('正在准备任务、核验或清理缓存，请稍后再试。');
+    if(!this.setup.snapshot().ready){
+      if(owner) this.panel(owner,'translation',true);
+      throw new Error('首次使用需要准备运行环境并填写模型配置：请在 PDF 翻译面板点击“一键准备环境”。');
+    }
     if(args.background!==false && !owner) throw new Error('请先选择一个会话，再开始后台翻译。');
     this.busy=true;
     try {
@@ -174,5 +186,5 @@ export class TranslatorManager {
     return {path:folder,parent:path.dirname(folder)===folder?'':path.dirname(folder),truncated:all.length>500,
       entries:all.slice(0,500).map(d=>({name:d.name,path:path.join(folder,d.name),directory:d.isDirectory()}))};
   }
-  async dispose(){this.closed=true;this.pickerController?.abort();for(const c of this.controllers)c.abort();await this.pending;await this.review.pending;await this.writeChain;}
+  async dispose(){this.closed=true;this.setup.cancel();this.pickerController?.abort();for(const c of this.controllers)c.abort();await this.pending;await this.review.pending;await this.writeChain;}
 }

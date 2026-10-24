@@ -34,13 +34,17 @@ export function Panel({store,call,ensureSession}){
   const ui=useSyncExternalStore(store.subscribe,store.get);
   const entryPosition=useFloatingPosition('entry',!ui.visible);
   const panelPosition=useFloatingPosition('panel',ui.visible,entryPosition.getPosition);
-  const [state,setState]=useState({tasks:[],outputDir:'',configured:true,busy:false});
+  const [state,setState]=useState({tasks:[],outputDir:'',configured:true,busy:false,setup:null});
   const [dialog,setDialog]=useState(null),[pages,setPages]=useState('全部'),[manualPath,setManualPath]=useState('');
   const [error,setError]=useState(''),[pending,setPending]=useState(false),[notice,setNotice]=useState('');
   const [caches,setCaches]=useState(null),[confirmation,setConfirmation]=useState(null);
+  const [configForm,setConfigForm]=useState({baseUrl:'',model:'',apiKey:''});
   const lastPanelRequest=useRef(null),lock=useRef(false),generation=useRef(0);
   const current=state.tasks.find(t=>activeStates.has(t.status));
   const selection=dialog?.kind==='translate'?pageSelection(pages,dialog.info.pages):null;
+  const setup=state.setup;
+  const setupReady=!setup||setup.ready!==false;
+  const needsEnvironment=Boolean(setup&&(setup.missing?.python||setup.missing?.runtime));
   function close(){setDialog(null);setConfirmation(null);setError('');}
   async function action(fn){
     if(lock.current)return;
@@ -57,6 +61,18 @@ export function Panel({store,call,ensureSession}){
     return next;
   }
   async function loadCaches(){setCaches(await call({action:'caches'}));}
+  function openConfig(){
+    const config=state.setup?.config||{};
+    setConfigForm({baseUrl:config.baseUrl||'',model:config.model||'',apiKey:''});
+    setDialog({kind:'config'});
+  }
+  async function runSetup(){await call({action:'setupStart'});await refresh();}
+  async function cancelSetup(){await call({action:'setupCancel'});await refresh();}
+  async function saveConfig(){
+    const result=await call({action:'saveConfig',baseUrl:configForm.baseUrl.trim(),model:configForm.model.trim(),apiKey:configForm.apiKey});
+    setState(prev=>prev.setup?{...prev,setup:{...prev.setup,config:result,missing:{...prev.setup.missing,model:false}}}:prev);
+    close();setNotice('模型配置已保存。');await refresh();
+  }
   useEffect(()=>{
     let alive=true,timer;
     async function poll(){
@@ -67,7 +83,7 @@ export function Panel({store,call,ensureSession}){
     poll();return()=>{alive=false;clearTimeout(timer);};
   },[ui.visible,ui.sessionId,call]);
   useEffect(()=>{
-    generation.current++;close();setCaches(null);setState({tasks:[],outputDir:'',busy:false});
+    generation.current++;close();setCaches(null);setState({tasks:[],outputDir:'',busy:false,setup:null});
   },[ui.sessionId]);
   useEffect(()=>{
     const request=state.panelRequest;
@@ -100,6 +116,7 @@ export function Panel({store,call,ensureSession}){
     catch(e){if(valid()){setManualPath(result.path);setDialog({kind:'manual',target:kind});}throw e;}
   }
   async function start(valid){
+    if(!setupReady)throw new Error('请先完成运行环境准备和模型配置。');
     if(selection.error)throw new Error(selection.error);
     const args={pdf:dialog.info.path,pages:selection.pages,workers:4,imageQuality:'safe',thinking:'auto',outputDir:state.outputDir,aiReview:state.aiReview===true};
     const sessionId=store.get().sessionId || await ensureSession?.();
@@ -116,9 +133,28 @@ export function Panel({store,call,ensureSession}){
     <section className="pdf-panel" ref={panelPosition.ref} style={panelPosition.style} aria-label="PDF 翻译面板" hidden={!ui.visible}>
       <header {...panelPosition.handle}><strong className="pdf-drag-handle" tabIndex={0} onKeyDown={panelPosition.handle.onKeyDown} title="拖动或使用方向键移动面板" aria-label="移动 PDF 翻译面板">⠿ PDF 翻译</strong><button onClick={()=>store.set({visible:false})}>收起</button></header>
       <div className="pdf-body">
+        {setup&&!setup.ready&&<div className="pdf-setup" role="status">
+          {setup.running?<>
+            <strong>正在准备运行环境…</strong>
+            <progress aria-label="环境准备进度"/>
+            <small>{setup.message||'正在下载并安装组件'}{setup.elapsedSeconds?` · ${setup.elapsedSeconds} 秒`:''}</small>
+            <div className="pdf-row"><button disabled={pending} onClick={()=>action(cancelSetup)}>取消</button></div>
+          </>:<>
+            <strong>{needsEnvironment?'首次使用需要准备运行环境':'还差模型配置'}</strong>
+            <small>{needsEnvironment?'约 300 MB，需要联网；视网络情况可能需要几分钟。':'填写接口地址、模型名称和 API 密钥后即可开始翻译。'}</small>
+            {setup.error&&<p role="alert" className="pdf-error">{setup.error}</p>}
+            {setup.configError&&<p role="alert" className="pdf-error">{setup.configError}</p>}
+            {setup.platformOk===false
+              ?<small>当前系统不支持自动安装，仅支持 Windows。</small>
+              :needsEnvironment
+                ?<button disabled={pending} onClick={()=>action(runSetup)}>{setup.error?'重试准备环境':'一键准备环境'}</button>
+                :<button disabled={pending} onClick={openConfig}>填写模型配置</button>}
+          </>}
+        </div>}
         <div className="pdf-actions">
           <button disabled={pending} onClick={()=>action(valid=>choose('pdf',valid))}>选择 PDF</button>
           <button disabled={pending} onClick={()=>action(valid=>choose('directory',valid))}>选择输出目录</button>
+          <button disabled={pending} onClick={openConfig}>模型配置</button>
           <button disabled={pending} onClick={()=>{setDialog({kind:'cache'});setConfirmation(null);action(loadCaches);}}>清理缓存</button>
         </div>
         <label className="pdf-review-toggle"><span>AI 核验</span><input type="checkbox" role="switch" checked={state.aiReview===true} disabled={pending}
@@ -134,18 +170,26 @@ export function Panel({store,call,ensureSession}){
         </div>}
       </div>
     </section>
-    {dialog&&<Dialog title={dialog.kind==='translate'?'确认翻译':dialog.kind==='cache'?'清理缓存':dialog.target==='pdf'?'手动输入 PDF 路径':'手动输入输出目录'} pending={pending} onClose={close}>
+    {dialog&&<Dialog title={dialog.kind==='translate'?'确认翻译':dialog.kind==='cache'?'清理缓存':dialog.kind==='config'?'模型配置':dialog.target==='pdf'?'手动输入 PDF 路径':'手动输入输出目录'} pending={pending} onClose={close}>
       {dialog.kind==='translate'&&<>
         <p className="pdf-document" title={dialog.info.path}>{fileName(dialog.info.path)} <small>共 {dialog.info.pages} 页</small></p>
         <label>输出目录<small className="pdf-path">{state.outputDir}</small></label>
         <label htmlFor="pdf-pages">翻译页码<input id="pdf-pages" autoFocus value={pages} placeholder="全部，或 1,3,5-8" onChange={e=>setPages(e.target.value)}/></label>
         {selection.error?<p role="alert" className="pdf-error">{selection.error}</p>:<small>将翻译 {selection.count} 页；留空表示全部。</small>}
+        {!setupReady&&<small>请先完成运行环境准备和模型配置。</small>}
         {state.busy&&<small>已有任务运行或正在准备，请在原生任务中查看。</small>}
-        <div className="pdf-dialog-actions"><button disabled={pending} onClick={close}>取消</button><button className="pdf-primary" disabled={pending||!!selection.error||state.busy||!state.outputDir} onClick={()=>action(start)}>开始翻译</button></div>
+        <div className="pdf-dialog-actions"><button disabled={pending} onClick={close}>取消</button><button className="pdf-primary" disabled={pending||!!selection.error||state.busy||!state.outputDir||!setupReady} onClick={()=>action(start)}>开始翻译</button></div>
       </>}
       {dialog.kind==='manual'&&<>
         <label htmlFor="pdf-manual">{dialog.target==='pdf'?'PDF 绝对路径':'输出目录绝对路径'}<input id="pdf-manual" autoFocus value={manualPath} onChange={e=>setManualPath(e.target.value)}/></label>
         <div className="pdf-dialog-actions"><button disabled={pending} onClick={close}>取消</button><button className="pdf-primary" disabled={pending||!manualPath.trim()} onClick={()=>action(valid=>acceptPath(dialog.target,manualPath,valid))}>{dialog.target==='pdf'?'读取文档':'保存目录'}</button></div>
+      </>}
+      {dialog.kind==='config'&&<>
+        <label htmlFor="pdf-base-url">接口地址<input id="pdf-base-url" autoFocus value={configForm.baseUrl} placeholder="https://api.deepseek.com/v1" onChange={e=>setConfigForm({...configForm,baseUrl:e.target.value})}/></label>
+        <label htmlFor="pdf-model">模型名称<input id="pdf-model" value={configForm.model} placeholder="支持图片输入的模型名" onChange={e=>setConfigForm({...configForm,model:e.target.value})}/></label>
+        <label htmlFor="pdf-api-key">API 密钥<input id="pdf-api-key" type="password" autoComplete="new-password" value={configForm.apiKey} placeholder={state.setup?.config?.hasApiKey?'已保存，留空保持不变':'请输入密钥'} onChange={e=>setConfigForm({...configForm,apiKey:e.target.value})}/></label>
+        <small>密钥只保存在本机 config.json，不会上传。</small>
+        <div className="pdf-dialog-actions"><button disabled={pending} onClick={close}>取消</button><button className="pdf-primary" disabled={pending||!configForm.baseUrl.trim()||!configForm.model.trim()||(!state.setup?.config?.hasApiKey&&!configForm.apiKey.trim())} onClick={()=>action(saveConfig)}>保存</button></div>
       </>}
       {dialog.kind==='cache'&&<>
         <small>按文档清理所有模型版本；原 PDF 和导出成果保留。</small>

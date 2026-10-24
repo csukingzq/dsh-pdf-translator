@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0 — 2026-10-24
+
+- 首次运行改为在 PDF 翻译面板内一键完成：自动创建 Python 环境、安装依赖并下载 Pandoc / Tectonic，显示阶段、可取消、可重试。
+- 新增面板内「模型配置」表单，直接填写 `base_url`、`model`、`api_key`，不再需要手动编辑 `config.json`。
+- 环境未就绪时 `pdf_translate` 会提示并自动打开面板；错误信息不再引导用户去终端跑脚本。
+- 新增面板接口 `setupStart`、`setupCancel`、`saveConfig`；`status` 返回环境与配置状态。API 密钥只写本机配置文件，不通过状态接口回传。
+- 安装完成和配置保存后无需重启即可翻译；手动 `setup.ps1` 作为离线/高级方式保留。
+
 ## 0.3.0 — 2026-10-24
 
 - 输出目录改为每次翻译一个子文件夹，里面只有中文 PDF 和 LaTeX 源码 zip；不再写出 `translated.md`、`crops/`、`document.json`、`layout.json`、`*.report.json` 和 `previews/`。

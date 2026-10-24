@@ -70,7 +70,7 @@ export function runPython(request, config = {}, signal, onProgress) {
       if (stdout.length > 2_000_000) stop(new Error('Python 返回数据过大。'));
     });
     child.stderr.on('data', (data) => { stderr = (stderr + data).slice(-8000); });
-    child.on('error', () => { cleanup(); reject(new Error(`无法启动 Python（${python}）。请运行 ${setupCommand()}，或在插件配置中设置 pythonPath。`)); });
+    child.on('error', () => { cleanup(); reject(new Error(`无法启动 Python（${python}）。请打开 PDF 翻译面板点击“一键准备环境”，或在插件配置中设置 pythonPath。`)); });
     child.on('close', async (code) => {
       cleanup();
       await stopTree;
@@ -78,7 +78,7 @@ export function runPython(request, config = {}, signal, onProgress) {
       let result;
       if (streamError) return reject(new Error(streamError));
       try { result = onProgress ? streamedResult : JSON.parse(stdout.trim()); if (!result) throw new Error(); }
-      catch { return reject(new Error(`Python 未返回有效结果（退出码 ${code}）。请运行 ${setupCommand()} 检查环境。${stderr.includes('ModuleNotFoundError') ? ' 缺少 Python 依赖。' : ''}`)); }
+      catch { return reject(new Error(`Python 未返回有效结果（退出码 ${code}）。请打开 PDF 翻译面板点击“一键准备环境”检查环境，或运行 ${setupCommand()}。${stderr.includes('ModuleNotFoundError') ? ' 缺少 Python 依赖。' : ''}`)); }
       if (code !== 0 || result.error) return reject(new Error(result.error || `Python 退出码 ${code}`));
       resolve(result);
     });

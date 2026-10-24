@@ -33,7 +33,7 @@ export function apply(ctx, config = {}) {
     exec.signal ? AbortSignal.any([exec.signal, controller.signal]) : controller.signal);
   ctx.tools.register(defineTool({
     name: 'pdf_translate',
-    description: '用视觉 AI 将 PDF 翻译成中文，输出中文 PDF 和 LaTeX 源码压缩包（zip）。正文、公式、图表边界与表格均由 AI 识别，不调用本地 OCR。图保留原样并在下方添加中文标签对照。输出目录每次都新建一个子文件夹，里面只有 PDF 与 LaTeX 源码 zip 两个文件。调用会将选中页图片发送到配置的模型接口，可能耗时数分钟；建议先指定少量 pages。成功后遵循结果 completionPolicy；AI 核验关闭时仅简短提示已有警告，不继续读取或检查成果。',
+    description: '用视觉 AI 将 PDF 翻译成中文，输出中文 PDF 和 LaTeX 源码压缩包（zip）。正文、公式、图表边界与表格均由 AI 识别，不调用本地 OCR。图保留原样并在下方添加中文标签对照。输出目录每次都新建一个子文件夹，里面只有 PDF 与 LaTeX 源码 zip 两个文件。首次使用必须先准备运行环境并填写模型配置：失败时按提示引导用户打开 PDF 翻译面板完成，不要尝试在终端手改配置。调用会将选中页图片发送到配置的模型接口，可能耗时数分钟；建议先指定少量 pages。成功后遵循结果 completionPolicy；AI 核验关闭时仅简短提示已有警告，不继续读取或检查成果。',
     parameters: {
       pdf: { ...string, required: true, description: '本地 PDF 绝对路径' },
       pages: { ...string, description: 'all 或 1,3-5，默认 all' },
@@ -96,7 +96,7 @@ export function apply(ctx, config = {}) {
     execute: (args, exec) => call({ ...args, operation: 'inspect' }, exec),
   }));
   ctx.tools.register(defineTool({
-    name: 'pdf_translator_doctor', description: '检查 Python、PDF 渲染器、LaTeX 编译器与模型配置是否存在，不调用模型、不返回密钥；同时显示插件、数据、配置和运行时目录。',
+    name: 'pdf_translator_doctor', description: '检查 Python、PDF 渲染器、LaTeX 编译器与模型配置是否存在，不调用模型、不返回密钥；同时显示插件、数据、配置和运行时目录。若检查失败或环境未就绪，引导用户打开 PDF 翻译面板点击“一键准备环境”并填写模型配置，不要让用户手改 JSON 或在终端跑脚本。',
     parameters: {}, output: output({ python: string, pymupdf: string, recognition: string, model_configured: { type: 'boolean' }, plugin_root: string, data_dir: string, config_path: string, runtime_dir: string }),
     execute: (_args, exec) => call({ operation: 'doctor' }, exec),
   }));

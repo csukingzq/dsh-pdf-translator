@@ -35,10 +35,20 @@ function controlledRunner(){
       return new Promise((a,b)=>{resolve=a;reject=b;signal?.addEventListener('abort',()=>reject(new Error('cancelled')),{once:true});});
     }};
 }
+function readySetup(){
+  return {
+    running:false,
+    cancel(){},
+    snapshot:()=>({ready:true,running:false,platform:'win32',platformOk:true,phase:'done',message:'',error:'',configError:'',elapsedSeconds:0,log:[],
+      missing:{python:false,runtime:false,config:false,model:false},config:{baseUrl:'https://example.invalid/v1',model:'test',hasApiKey:true}}),
+    start(){return this.snapshot();},
+    saveConfig:input=>({baseUrl:input.baseUrl,model:input.model,hasApiKey:true}),
+  };
+}
 
 test('native Harness job: ownership, progress, duplicate prevention, and chat cancellation independence',async t=>{
   const dir=await temp(t),ctx=await jobsContext(),runner=controlledRunner();
-  const m=new TranslatorManager(ctx,{dataDir:dir},runner.run);t.after(async()=>{await m.dispose();await ctx.fiber.dispose();});
+  const m=new TranslatorManager(ctx,{dataDir:dir},runner.run,undefined,readySetup());t.after(async()=>{await m.dispose();await ctx.fiber.dispose();});
   const invocation=new AbortController();
   const result=await m.start({pdf:fixture},'session-a',{signal:invocation.signal,callId:'nested',rootCallId:'root'});
   await pause();invocation.abort();
@@ -61,7 +71,7 @@ test('native Harness job: ownership, progress, duplicate prevention, and chat ca
 });
 
 test('native cancellation waits for producer and leaves resumable task state',async t=>{
-  const dir=await temp(t),ctx=await jobsContext(),runner=controlledRunner(),m=new TranslatorManager(ctx,{dataDir:dir},runner.run);
+  const dir=await temp(t),ctx=await jobsContext(),runner=controlledRunner(),m=new TranslatorManager(ctx,{dataDir:dir},runner.run,undefined,readySetup());
   t.after(async()=>{await m.dispose();await ctx.fiber.dispose();});
   const job=await m.start({pdf:fixture},'session-a');await pause();await m.cancel('session-a',job.jobId);await m.pending;await pause();
   assert.equal(ctx.jobs.get(job.jobId,'session-a').status,'killed');
@@ -69,7 +79,7 @@ test('native cancellation waits for producer and leaves resumable task state',as
 });
 
 test('output defaults persist; cache deletion requires a fresh one-use user confirmation',async t=>{
-  const dir=await temp(t),ctx=new Context(),runner=controlledRunner(),m=new TranslatorManager(ctx,{dataDir:dir},runner.run);
+  const dir=await temp(t),ctx=new Context(),runner=controlledRunner(),m=new TranslatorManager(ctx,{dataDir:dir},runner.run,undefined,readySetup());
   t.after(()=>m.dispose());
   const chosen=path.join(dir,'中文 输出');await m.settings(chosen);
   const resolvedChosen=await fs.realpath(chosen);
@@ -79,7 +89,7 @@ test('output defaults persist; cache deletion requires a fresh one-use user conf
   const selection=await m.prepareClear('0123456789abcdef');
   assert.equal((await m.clear(selection.id,selection.token)).cleared,true);
   await assert.rejects(m.clear(selection.id,selection.token),/确认/);
-  const restored=new TranslatorManager(ctx,{dataDir:dir},runner.run);await restored.ready;
+  const restored=new TranslatorManager(ctx,{dataDir:dir},runner.run,undefined,readySetup());await restored.ready;
   assert.equal((await restored.status()).outputDir,resolvedChosen);await restored.dispose();await ctx.fiber.dispose();
 });
 
@@ -102,6 +112,8 @@ test('strict Harness Gateway dispatch accepts valid requests and rejects extra f
   assert.deepEqual(await invoke({action:'pick',kind:'pdf'}),{cancelled:true});
   await assert.rejects(invoke({action:'pick',kind:'executable'}));
   await assert.rejects(invoke({action:'status',deleteEverything:true}),/input|argument|field/i);
+  await assert.rejects(invoke({action:'saveConfig',baseUrl:'https://api.example/v1',model:'vision',extra:true}),/input|argument|field/i);
+  await assert.rejects(invoke({action:'saveConfig',baseUrl:'https://api.example/v1'}),/input|argument|field/i);
   await assert.rejects(invoke({action:'clear',identity:'../outputs',token:'x'}));
   peer.principal={kind:'guest'};await assert.rejects(invoke({action:'status'}),/桌面用户/);
   await assert.rejects(invoke({action:'pick',kind:'directory'}),/桌面用户/);
@@ -120,6 +132,30 @@ test('one native picker at a time; cancellation preserves settings; disposal abo
   assert.equal((await m.status()).outputDir,original);
   const next=m.pick('pdf');const rejected=assert.rejects(next,/aborted/);await pause();await m.dispose();await rejected;
   await ctx.fiber.dispose();
+});
+
+test('first-run setup blocks translation, opens the panel and forwards setup/config calls',async t=>{
+  const dir=await temp(t),ctx=new Context(),runner=controlledRunner();
+  const snapshot=()=>({...readySetup().snapshot(),ready:false,missing:{python:true,runtime:true,config:false,model:true}});
+  const calls=[];
+  const env={...readySetup(),snapshot,
+    start:()=>{calls.push('start');return snapshot();},
+    cancel:()=>calls.push('cancel'),
+    saveConfig:input=>({baseUrl:input.baseUrl,model:input.model,hasApiKey:true})};
+  const m=new TranslatorManager(ctx,{dataDir:dir},runner.run,undefined,env);
+  t.after(()=>m.dispose());
+  const status=await m.status('session-a');
+  assert.equal(status.setup.ready,false);
+  assert.equal(status.busy,false);
+  await assert.rejects(m.start({pdf:fixture},'session-a'),/一键准备环境/);
+  const after=await m.status('session-a');
+  assert.equal(after.panelRequest.visible,true);
+  assert.equal(after.panelRequest.section,'translation');
+  assert.equal((await m.setupStart()).ready,false);
+  await m.setupCancel();
+  assert.deepEqual(calls,['start','cancel']);
+  assert.deepEqual(await m.saveConfig({baseUrl:'https://api.example/v1',model:'vision'}),
+    {baseUrl:'https://api.example/v1',model:'vision',hasApiKey:true});
 });
 
 test('streaming Python bridge and legacy JSON produce identical inspection results',async()=>{

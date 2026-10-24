@@ -8,6 +8,7 @@
 - 图形按原边界裁取，保留原始曲线和数据；图下附中文对照说明。
 - 表格重建为 Markdown / HTML，支持合并单元格。
 - 每次翻译在输出目录下新建一个子文件夹，里面只有中文 PDF 和 LaTeX 源码 zip 两个文件。
+- 首次运行在 PDF 翻译面板一键准备环境、填写模型配置，不需要终端或手改 JSON。
 - 支持后台任务、任务取消、断点续跑和缓存复用。
 - 可选 AI 核验：逐页检查译文，最多两轮修订与重新编译。
 - 缓存由用户手动清理，不自动删除。
@@ -41,19 +42,37 @@ npx.cmd @deepseek-ai/dsh plugin --profile web add dsh-pdf-translator
 
 下载 [dsh-pdf-translator.tgz](https://github.com/csukingzq/dsh-pdf-translator/releases/latest/download/dsh-pdf-translator.tgz)，在 **插件 → 添加插件** 中选择该文件。
 
-### 首次运行环境
+### 首次运行：面板一键完成
 
-安装插件后，打开 PowerShell 执行对应 profile 的环境安装脚本：
+安装并启用插件，重启 Harness 后打开左下角或标题栏的 **PDF 翻译** 面板：
+
+1. 首次会显示「首次使用需要准备运行环境」，点 **一键准备环境**。插件会自动创建 Python 环境、安装依赖并下载 Pandoc / Tectonic（约 300 MB，需要联网），面板显示进度，可取消或重试。
+2. 就绪后点 **填写模型配置**，填写接口地址、模型名称和 API 密钥并保存。密钥只写入本机 `config.json`，不会上传。
+3. 直接 **选择 PDF** 开始翻译，不需要重启。
+
+已配置过的用户不会看到向导；之后可随时用面板里的 **模型配置** 修改。
+
+### 手动安装环境（离线/网络受限时）
+
+如果自动安装失败（例如无法访问 GitHub 或 pip 源），可以在 PowerShell 中手动执行：
+
+> 安装长时间停在「安装 Python 依赖」通常是 PyPI 或代理不通。可以先配置 pip 镜像再重试：
+>
+> ```powershell
+> & "$env:USERPROFILE\.dsh\dsh-pdf-translator\.venv\Scripts\python.exe" -m pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
+> ```
+>
+> Pandoc / Tectonic 需要访问 GitHub Releases；无法访问时请手动下载后放进 `%USERPROFILE%\.dsh\dsh-pdf-translator\runtime`。
 
 ```powershell
-# 桌面版
-powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\dsh-pdf-translator\scripts\setup.ps1"
+# 直接调用脚本（推荐，不依赖 powershell 在 PATH 中）
+& "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\dsh-pdf-translator\scripts\setup.ps1"
 
-# Web / CLI
-powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\.dsh\profiles\web\node_modules\dsh-pdf-translator\scripts\setup.ps1"
+# 或使用完整路径的 powershell.exe
+& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ExecutionPolicy Bypass -File "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\dsh-pdf-translator\scripts\setup.ps1"
 ```
 
-然后编辑模型配置：
+Web / CLI profile 把 `desktop` 换成 `web`。然后编辑模型配置：
 
 ```text
 %USERPROFILE%\.dsh\dsh-pdf-translator\config.json
@@ -69,7 +88,7 @@ powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\.dsh\profiles\web\nod
 }
 ```
 
-最后新建聊天，发送「调用 pdf_translator_doctor 检查 PDF 翻译插件环境」。
+手动改完后无需重启，直接翻译即可。也可以在聊天中发送「调用 pdf_translator_doctor 检查 PDF 翻译插件环境」。
 
 ## 使用
 

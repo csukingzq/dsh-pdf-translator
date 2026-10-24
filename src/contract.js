@@ -9,6 +9,9 @@ export const translateSchema = z.strictObject({
 });
 export const requestSchema = z.discriminatedUnion('action', [
   z.strictObject({ action:z.literal('status'), sessionId:z.string().optional() }),
+  z.strictObject({ action:z.literal('setupStart') }),
+  z.strictObject({ action:z.literal('setupCancel') }),
+  z.strictObject({ action:z.literal('saveConfig'), baseUrl:z.string().min(1), model:z.string().min(1), apiKey:z.string().optional() }),
   z.strictObject({ action:z.literal('browse'), path:z.string().optional(), directories:z.boolean().optional() }),
   z.strictObject({ action:z.literal('pick'), kind:z.enum(['pdf','directory']) }),
   z.strictObject({ action:z.literal('inspect'), pdf:z.string(), pages:z.string().optional() }),

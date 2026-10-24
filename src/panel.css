@@ -12,6 +12,9 @@
 .pdf-panel header{cursor:grab;touch-action:none;user-select:none;padding:7px 9px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--pdf-border)}
 .pdf-panel header:active{cursor:grabbing}.pdf-panel header button{padding:2px 6px;font-size:11px;touch-action:manipulation}
 .pdf-body{padding:9px;overflow:auto;display:flex;flex-direction:column;gap:8px}.pdf-actions{display:flex;flex-direction:column;gap:5px}.pdf-actions button{text-align:left;padding:6px 9px}
+.pdf-setup{border:1px solid var(--pdf-border);background:var(--pdf-fill);border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:5px}
+.pdf-setup strong{font-size:12px}.pdf-setup progress{width:100%;height:6px;accent-color:#346fe5}
+.pdf-setup .pdf-row{justify-content:flex-start}.pdf-setup .pdf-error{font-size:11px}
 .pdf-row{display:flex;align-items:center;justify-content:space-between;gap:7px}.pdf-translator-ui small{display:block;font-size:11px;overflow-wrap:anywhere}
 .pdf-task{border-top:1px solid var(--pdf-border);padding-top:8px;display:flex;flex-direction:column;gap:4px}.pdf-task>strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px}
 .pdf-task progress{width:100%;height:6px;accent-color:#346fe5}.pdf-error{color:var(--pdf-error);overflow-wrap:anywhere;margin:0;font-size:12px}
