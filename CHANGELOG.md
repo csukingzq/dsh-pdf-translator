@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.2 — 2026-10-24
+
+- 模型配置对话框在接口地址为空时预填 `https://api.deepseek.com/v1`，避免把 placeholder 误当成已填写而无法点保存。
+- 空文件或 0 字节的 `config.json` 视为未配置（不再报格式错误），可直接在面板保存，`setup.ps1` 也会重新写入示例配置。
+
 ## 0.4.1 — 2026-10-24
 
 - 环境安装默认使用国内镜像：Tectonic / Pandoc 优先经 `ghproxy.net`、`gh-proxy.com`、`ghfast.top` 下载，pip 依赖优先用清华、阿里源；失败自动回退官方 GitHub / PyPI。可用 `-OfficialOnly` 强制官方源。

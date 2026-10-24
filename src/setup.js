@@ -79,7 +79,9 @@ export class SetupController {
   readConfigFile() {
     if (!existsFile(this.configPath)) return { exists: false, error: '', value: null };
     try {
-      const value = JSON.parse(fs.readFileSync(this.configPath, 'utf8').replace(/^\uFEFF/, ''));
+      const text = fs.readFileSync(this.configPath, 'utf8').replace(/^\uFEFF/, '').trim();
+      if (!text) return { exists: false, error: '', value: null };
+      const value = JSON.parse(text);
       if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('顶层必须是对象');
       return { exists: true, error: '', value };
     } catch (error) {

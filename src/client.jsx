@@ -63,7 +63,7 @@ export function Panel({store,call,ensureSession}){
   async function loadCaches(){setCaches(await call({action:'caches'}));}
   function openConfig(){
     const config=state.setup?.config||{};
-    setConfigForm({baseUrl:config.baseUrl||'',model:config.model||'',apiKey:''});
+    setConfigForm({baseUrl:config.baseUrl||'https://api.deepseek.com/v1',model:config.model||'',apiKey:''});
     setDialog({kind:'config'});
   }
   async function runSetup(){await call({action:'setupStart'});await refresh();}

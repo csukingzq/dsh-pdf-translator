@@ -80,6 +80,7 @@ test('model config dialog saves without exposing the stored key',async()=>{
     const key=view.getByLabelText('API 密钥');
     assert.equal(key.type,'password');
     assert.equal(key.value,'');
+    assert.equal(view.getByLabelText('接口地址').value,'https://api.deepseek.com/v1');
     fireEvent.change(view.getByLabelText('接口地址'),{target:{value:'https://api.example.com/v1'}});
     fireEvent.change(view.getByLabelText('模型名称'),{target:{value:'vision-model'}});
     fireEvent.change(key,{target:{value:'secret-key'}});

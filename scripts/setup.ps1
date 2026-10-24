@@ -157,7 +157,7 @@ Install-ZipPackage -Name 'tectonic' -Urls (Get-CandidateUrls $TectonicUrl) -Dest
 Install-ZipPackage -Name 'pandoc' -Urls (Get-CandidateUrls $PandocUrl) -Destination (Join-Path $runtimeDir 'pandoc') -ExeName 'pandoc.exe'
 
 $createdConfig = $false
-if (-not (Test-Path -LiteralPath $configPath)) {
+if ((-not (Test-Path -LiteralPath $configPath)) -or ((Get-Item -LiteralPath $configPath).Length -eq 0)) {
     Copy-Item -LiteralPath (Join-Path $projectRoot 'config.example.json') -Destination $configPath
     $createdConfig = $true
 }

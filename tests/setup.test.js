@@ -97,6 +97,20 @@ test('placeholder model and empty key are not treated as configured', (t) => {
   assert.equal(snapshot.configError, '');
 });
 
+test('empty config file is treated as unconfigured and can be saved', (t) => {
+  const { dir, controller } = make(t);
+  fs.writeFileSync(path.join(dir, 'config.json'), '');
+  const snapshot = controller.snapshot();
+  assert.equal(snapshot.configError, '');
+  assert.equal(snapshot.missing.config, true);
+  assert.equal(snapshot.missing.model, true);
+  const saved = controller.saveConfig({ baseUrl: 'https://api.example.com/v1', model: 'vision', apiKey: 'k' });
+  assert.equal(saved.hasApiKey, true);
+  const written = JSON.parse(fs.readFileSync(path.join(dir, 'config.json'), 'utf8'));
+  assert.equal(written.base_url, 'https://api.example.com/v1');
+  assert.equal(written.model, 'vision');
+});
+
 test('start spawns the absolute PowerShell setup script and follows phases', (t) => {
   const { dir, scriptPath, controller, child, spawnCalls } = make(t);
   const started = controller.start();
