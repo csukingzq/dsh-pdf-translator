@@ -1,21 +1,36 @@
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import {
+  root,
+  resolveDataDir,
+  resolveConfigPath,
+  resolvePythonPath,
+  resolveRuntimeDir,
+  setupCommand,
+} from './paths.js';
 
-export const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+export { root };
+
 export function pythonPath(config = {}) {
-  if (config.pythonPath) return config.pythonPath;
-  const local = path.join(root, '.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
-  return existsSync(local) ? local : (process.platform === 'win32' ? 'python' : 'python3');
+  return resolvePythonPath(config);
 }
 
 export function runPython(request, config = {}, signal, onProgress) {
   signal?.throwIfAborted();
+  const dataDir = resolveDataDir(config);
+  const configPath = resolveConfigPath(config, dataDir);
+  const runtimeDir = resolveRuntimeDir(config, dataDir);
+  const python = pythonPath(config);
   return new Promise((resolve, reject) => {
-    const child = spawn(pythonPath(config), ['-u', path.join(root, 'work/cli.py')], {
+    const child = spawn(python, ['-u', path.join(root, 'work/cli.py')], {
       cwd: root, windowsHide: true, shell: false,
-      env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' },
+      env: {
+        ...process.env,
+        PYTHONIOENCODING: 'utf-8',
+        PYTHONUTF8: '1',
+        DSH_PDF_DATA_DIR: dataDir,
+        DSH_PDF_RUNTIME_DIR: runtimeDir,
+      },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     let stdout = '', stderr = '', stopped, streamedResult, streamError, stopTree=Promise.resolve();
@@ -55,7 +70,7 @@ export function runPython(request, config = {}, signal, onProgress) {
       if (stdout.length > 2_000_000) stop(new Error('Python 返回数据过大。'));
     });
     child.stderr.on('data', (data) => { stderr = (stderr + data).slice(-8000); });
-    child.on('error', () => { cleanup(); reject(new Error('无法启动 Python，请运行 scripts/setup.ps1 或配置 pythonPath。')); });
+    child.on('error', () => { cleanup(); reject(new Error(`无法启动 Python（${python}）。请运行 ${setupCommand()}，或在插件配置中设置 pythonPath。`)); });
     child.on('close', async (code) => {
       cleanup();
       await stopTree;
@@ -63,13 +78,13 @@ export function runPython(request, config = {}, signal, onProgress) {
       let result;
       if (streamError) return reject(new Error(streamError));
       try { result = onProgress ? streamedResult : JSON.parse(stdout.trim()); if (!result) throw new Error(); }
-      catch { return reject(new Error(`Python 未返回有效结果（退出码 ${code}）。请运行环境检查。${stderr.includes('ModuleNotFoundError') ? ' 缺少 Python 依赖。' : ''}`)); }
+      catch { return reject(new Error(`Python 未返回有效结果（退出码 ${code}）。请运行 ${setupCommand()} 检查环境。${stderr.includes('ModuleNotFoundError') ? ' 缺少 Python 依赖。' : ''}`)); }
       if (code !== 0 || result.error) return reject(new Error(result.error || `Python 退出码 ${code}`));
       resolve(result);
     });
     child.stdin.on('error', () => {});
     child.stdin.end(JSON.stringify({ ...request,
       events: Boolean(onProgress),
-      configPath: config.configPath || path.join(root, 'config.json'), dataDir: config.dataDir || root }));
+      configPath, dataDir }));
   });
 }

@@ -13,3 +13,5 @@ verification/live/work/
 __pycache__/
 *.pyc
 *.tgz
+dist/
+.npm-cache/

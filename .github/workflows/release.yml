@@ -1,0 +1,76 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify tag matches package version
+        shell: powershell
+        run: |
+          $version = node -p "require('./package.json').version"
+          if ($env:GITHUB_REF_NAME -ne "v$version") {
+            throw "Tag $env:GITHUB_REF_NAME does not match package version v$version"
+          }
+          "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Prepare PDF translator runtime
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup.ps1 -DataDir "${{ github.workspace }}"
+
+      - name: Build and test
+        run: |
+          npm run build
+          npm run check
+          npm test
+          .venv\Scripts\python.exe -m unittest discover -s work -p "test_*.py"
+
+      - name: Pack release artifact
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          npm pack --pack-destination dist
+          $versioned = Get-ChildItem "dist\dsh-pdf-translator-$env:VERSION.tgz"
+          Copy-Item $versioned.FullName (Join-Path dist 'dsh-pdf-translator.tgz')
+          node scripts/verify-package.mjs $versioned.FullName
+          node scripts/verify-package.mjs (Join-Path dist 'dsh-pdf-translator.tgz')
+          Get-FileHash -Algorithm SHA256 dist\*.tgz |
+            ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } |
+            Set-Content dist\SHA256SUMS.txt -Encoding ascii
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/dsh-pdf-translator.tgz
+            dist/dsh-pdf-translator-${{ env.VERSION }}.tgz
+            dist/SHA256SUMS.txt
+          generate_release_notes: true
+
+      - name: Publish to npm
+        if: env.NODE_AUTH_TOKEN != ''
+        run: npm publish "dist/dsh-pdf-translator-${{ env.VERSION }}.tgz" --provenance --access public --registry https://registry.npmjs.org/

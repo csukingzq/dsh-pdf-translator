@@ -66,10 +66,14 @@ def execute(request, on_progress=None):
             renderer = {'ready':True, 'pandoc':pandoc, 'tectonic':tectonic}
         except RuntimeError as exc:
             renderer = {'ready':False, 'error':str(exc)}
-        cfg = load_config(request.get('configPath') or ROOT/'config.json')
+        config_path = Path(request.get('configPath') or ROOT/'config.json')
+        cfg = load_config(config_path)
+        data_dir = Path(request.get('dataDir') or ROOT).resolve()
         return {'python':sys.executable, 'pymupdf':pymupdf.__version__, 'renderer':renderer,
                 'model_configured':bool(cfg.get('api_key') and cfg.get('model') and cfg.get('base_url')),
-                'recognition':'ai-only', 'local_ocr':False}
+                'recognition':'ai-only', 'local_ocr':False,
+                'plugin_root':str(ROOT), 'data_dir':str(data_dir), 'config_path':str(config_path.resolve()),
+                'runtime_dir':os.environ.get('DSH_PDF_RUNTIME_DIR') or str(ROOT/'runtime')}
     source = Path(request['pdf']).expanduser().resolve()
     if not source.is_file() or source.suffix.lower() != '.pdf':
         raise ValueError('找不到指定的 PDF 文件。')

@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Prepare PDF translator runtime
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup.ps1 -DataDir "${{ github.workspace }}"
+
+      - name: Build client bundle
+        run: npm run build
+
+      - name: Check JavaScript syntax
+        run: npm run check
+
+      - name: Run Node tests
+        run: npm test
+
+      - name: Run Python tests
+        run: .venv\Scripts\python.exe -m unittest discover -s work -p "test_*.py"
+
+      - name: Pack release artifact
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          npm pack --pack-destination dist
+
+      - name: Verify package contents
+        shell: powershell
+        run: |
+          $archive = Get-ChildItem dist\*.tgz | Select-Object -First 1
+          node scripts/verify-package.mjs $archive.FullName

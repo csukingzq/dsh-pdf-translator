@@ -96,8 +96,8 @@ export function apply(ctx, config = {}) {
     execute: (args, exec) => call({ ...args, operation: 'inspect' }, exec),
   }));
   ctx.tools.register(defineTool({
-    name: 'pdf_translator_doctor', description: '检查 Python、PDF 渲染器、LaTeX 编译器与模型配置是否存在，不调用模型、不返回密钥。',
-    parameters: {}, output: output({ python: string, pymupdf: string, recognition: string, model_configured: { type: 'boolean' } }),
+    name: 'pdf_translator_doctor', description: '检查 Python、PDF 渲染器、LaTeX 编译器与模型配置是否存在，不调用模型、不返回密钥；同时显示插件、数据、配置和运行时目录。',
+    parameters: {}, output: output({ python: string, pymupdf: string, recognition: string, model_configured: { type: 'boolean' }, plugin_root: string, data_dir: string, config_path: string, runtime_dir: string }),
     execute: (_args, exec) => call({ operation: 'doctor' }, exec),
   }));
 }

@@ -2,7 +2,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { randomUUID, createHash } from 'node:crypto';
-import { runPython, root } from './runner.js';
+import { runPython } from './runner.js';
+import { resolveDataDir } from './paths.js';
 import { translateSchema } from './contract.js';
 import {pickNative} from './native-picker.js';
 import {ReviewController, completionPolicy} from './review.js';
@@ -15,7 +16,7 @@ export function progressText(p) {
 export class TranslatorManager {
   constructor(ctx, config = {}, runner = runPython, picker = pickNative) {
     this.ctx=ctx; this.config=config; this.runner=runner;
-    this.dataDir=path.resolve(config.dataDir || root);
+    this.dataDir=path.resolve(resolveDataDir(config));
     this.stateFile=path.join(this.dataDir,'work','plugin-state.json');
     this.state={outputDir:path.resolve(config.outputDir || path.join(this.dataDir,'outputs')), configured:false, aiReview:false, tasks:[]};
     this.active=null; this.busy=false; this.closed=false; this.tokens=new Map(); this.controllers=new Set();

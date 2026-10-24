@@ -7,6 +7,7 @@ import base64
 import hashlib
 import html
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -15,6 +16,7 @@ from pathlib import Path
 import progress
 
 ROOT = Path(__file__).resolve().parent.parent
+RUNTIME = Path(os.environ.get('DSH_PDF_RUNTIME_DIR') or (ROOT/'runtime'))
 # Overfull boxes up to a few points are cosmetic. Blocking the whole PDF for
 # them costs one AI repair plus a full rebuild per box; only real overflow does.
 SEVERE_OVERFULL_PT = 20
@@ -102,10 +104,26 @@ HEADER = r"""
 
 
 def binaries():
-    pandoc = next((ROOT/'runtime/pandoc').glob('*/pandoc.exe'), None)
-    tectonic = ROOT/'runtime/tectonic/tectonic.exe'
-    if pandoc is None or not tectonic.is_file():
-        raise RuntimeError('缺少 LaTeX 运行时，请运行 setup-latex.cmd。')
+    roots = [RUNTIME]
+    legacy = ROOT/'runtime'
+    if legacy != RUNTIME:
+        roots.append(legacy)
+    pandoc = tectonic = None
+    for runtime in roots:
+        if pandoc is None:
+            pandoc = next((runtime/'pandoc').glob('*/pandoc.exe'), None)
+            if pandoc is None:
+                pandoc = next((runtime/'pandoc').glob('*/pandoc'), None)
+        if tectonic is None:
+            candidate = runtime/'tectonic'/'tectonic.exe'
+            if not candidate.is_file():
+                candidate = runtime/'tectonic'/'tectonic'
+            if candidate.is_file():
+                tectonic = candidate
+        if pandoc is not None and tectonic is not None:
+            break
+    if pandoc is None or tectonic is None:
+        raise RuntimeError(f'缺少 LaTeX 运行时（{RUNTIME}），请运行 scripts/setup.ps1。')
     return str(pandoc), str(tectonic)
 
 
