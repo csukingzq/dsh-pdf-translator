@@ -37,7 +37,16 @@ function make(t, overrides = {}) {
   const configPath = path.join(dir, 'config.json');
   const scriptPath = path.join(dir, 'setup.ps1');
   if (!fs.existsSync(scriptPath)) fs.writeFileSync(scriptPath, '# test');
-  const controller = new SetupController({}, {
+  // CI installs a legacy .venv/runtime inside the package checkout; pin both to
+  // the temporary data directory so this test stays isolated from it.
+  const previousRuntime = process.env.DSH_PDF_RUNTIME_DIR;
+  process.env.DSH_PDF_RUNTIME_DIR = path.join(dir, 'runtime');
+  t.after(() => {
+    if (previousRuntime === undefined) delete process.env.DSH_PDF_RUNTIME_DIR;
+    else process.env.DSH_PDF_RUNTIME_DIR = previousRuntime;
+  });
+  const config = { pythonPath: path.join(dir, '.venv', 'Scripts', 'python.exe') };
+  const controller = new SetupController(config, {
     dataDir: dir,
     configPath,
     scriptPath,
