@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pymupdf
 import progress
+import column_layout
 
 ROOT = Path(__file__).resolve().parent.parent
 import ai_client as api
@@ -729,10 +730,97 @@ def _figures_side_by_side(a, b):
 
 
 def _is_caption(block):
-    return block['kind'] == 'paragraph' and bool(re.match(r'\s*(?:图\s*\d|Figure\s+\d|Fig\.\s*\d)', block['markdown']))
+    """图/表题块，允许 Markdown 强调前缀（AI 常把 "图 2." 加粗）。"""
+    return block['kind'] == 'paragraph' and bool(re.match(
+        r'\s*(?:\*\*|__)?\s*(?:图\s*\d|Figure\s+\d|Fig\.\s*\d|表\s*\d|Table\s+\d)', block['markdown']))
+
+
+# A table this wide cannot stay readable inside one column of a two-column page.
+TABLE_SPAN_COLUMNS = 6
+COLUMN_OPEN = '<!-- translator-columns: {} -->'
+COLUMN_CLOSE = '<!-- translator-columns-end -->'
+FLOAT_OPEN = '<!-- translator-float: {} -->'
+FLOAT_CLOSE = '<!-- translator-float-end -->'
+FLOAT_KINDS = {'figure': 'figure', 'table': 'table'}
+
+
+def table_columns(markdown):
+    """Column count of a Markdown pipe table or an HTML table, for span decisions.
+
+    HTML headers carry rowspan/colspan, so the widest row is measured instead of
+    counting the cells of the first row.
+    """
+    text = markdown.strip()
+    if text.lower().startswith('<table'):
+        count = 0
+        for row in re.findall(r'<tr\b[\s\S]*?</tr\s*>', text, re.I):
+            total = 0
+            for attrs in re.findall(r'<t[dh]\b([^>]*)>', row, re.I):
+                span = re.search(r'colspan\s*=\s*["\']?\s*(\d+)', attrs, re.I)
+                total += int(span[1]) if span else 1
+            count = max(count, total)
+        return max(count, 1)
+    lines = [line for line in text.splitlines() if line.strip().startswith('|')]
+    if len(lines) >= 2:
+        return max(len(re.split(r'(?<!\\)\|', lines[0].strip().strip('|'))), 1)
+    return 0
+
+
+def reading_grid(pages, source, cache):
+    """Column grid for this document, honouring a manual `columns` override."""
+    if source is None:
+        return {'columns': 1, 'gutters': []}
+    try:
+        layout = json.loads((Path(cache)/'layout.json').read_text('utf-8'))
+    except (OSError, ValueError):
+        layout = {}
+    override = layout.get('columns') or 0
+    return column_layout.grid_for(source, pages, override)
+
+
+def bind_captions(pages):
+    """Match every figure/table to the caption sitting right below it.
+
+    The vision pass does not always keep a caption next to its block, and a
+    caption that strays from a wide element ends up in a different column.
+    """
+    bound = {}
+    for data in pages:
+        captions = [block for block in data['blocks'] if _is_caption(block)]
+        for block in data['blocks']:
+            if block['kind'] not in ('figure', 'table'):
+                continue
+            box = block['bbox']
+            best = None
+            for caption in captions:
+                cap = caption['bbox']
+                gap = cap[1]-box[3]
+                overlap = min(box[2], cap[2])-max(box[0], cap[0])
+                if -0.01 <= gap <= 0.06 and overlap > 0.3*(box[2]-box[0]):
+                    if best is None or gap < best[0]:
+                        best = (gap, caption)
+            if best is not None:
+                bound[block['id']] = best[1]['id']
+    return bound
 
 
 def assemble(pages, source, cache, progress_bar=None):
+    grid = reading_grid(pages, source, cache)
+    columns = grid.get('columns', 1)
+    bound = bind_captions(pages) if columns > 1 else {}
+    by_id = {block['id']: block for data in pages for block in data['blocks']}
+    consumed = set()
+
+    def spanning(block):
+        """A block is full width when it cannot belong to one column."""
+        if columns < 2:
+            return True
+        if block['kind'] == 'table':
+            count = table_columns(block.get('markdown', ''))
+            if count >= TABLE_SPAN_COLUMNS:
+                return True
+        return column_layout.spans(block['bbox'], grid)
+
     parts = []
     notes = []
     previous = None
@@ -743,6 +831,9 @@ def assemble(pages, source, cache, progress_bar=None):
         index = 0
         while index < len(blocks):
             block = blocks[index]
+            if block['id'] in consumed:
+                index += 1
+                continue
             # 同一行左右并排的多张图：合并为一个 figure-row，渲染时并排而非堆叠。
             if block['kind'] == 'figure':
                 row = [block]
@@ -763,7 +854,8 @@ def assemble(pages, source, cache, progress_bar=None):
                         inner.append(block_markdown(fig, source, cache))
                         if i < len(captions):
                             inner.append(block_markdown(captions[i], source, cache))
-                    parts.append('::: {.figure-row}\n\n' + '\n\n'.join(inner) + '\n\n:::')
+                    parts.append({'text': '::: {.figure-row}\n\n' + '\n\n'.join(inner) + '\n\n:::',
+                                  'span': spanning(row[0]), 'float': 'figure'})
                     previous = row[-1]
                     index = k
                     continue
@@ -775,12 +867,51 @@ def assemble(pages, source, cache, progress_bar=None):
             join = (previous and previous['kind']==block['kind']=='paragraph' and previous['page']+1==block['page']
                     and previous.get('continues_next') and block.get('continues_previous'))
             if join:
-                parts[-1] += text
+                parts[-1]['text'] += text
             else:
-                parts.append(text)
+                # A caption bound by position travels inside the same part, so a
+                # floating table or figure never loses its caption.
+                caption = bound.get(block['id'])
+                if caption and caption not in consumed and caption in by_id:
+                    text += '\n\n' + block_markdown(by_id[caption], source, cache)
+                    consumed.add(caption)
+                parts.append({'text': text, 'span': spanning(block),
+                              'float': FLOAT_KINDS.get(block['kind']),
+                              'caption': _is_caption(block)})
             previous = block
             index += 1
-    return '\n\n'.join(parts+notes)+'\n'
+    # Notes are definitions, not body flow: they always sit outside the columns.
+    items = parts + [{'text': text, 'span': True, 'float': None, 'caption': False} for text in notes]
+    output, opened, seen_columns, index = [], False, False, 0
+    while index < len(items):
+        item = items[index]
+        index += 1
+        # A wide figure or table is placed as a float so the text after it keeps
+        # filling the page instead of leaving the rest of the page blank.
+        if columns > 1 and seen_columns and item['span'] and item['float']:
+            if opened:
+                output.append(COLUMN_CLOSE)
+                opened = False
+            output.append(FLOAT_OPEN.format(item['float']))
+            output.append(item['text'])
+            # The caption may itself sit inside one column, but it belongs to
+            # the wide element and has to float with it.
+            while index < len(items) and items[index].get('caption'):
+                output.append(items[index]['text'])
+                index += 1
+            output.append(FLOAT_CLOSE)
+            continue
+        if columns > 1 and not item['span']:
+            if not opened:
+                output.append(COLUMN_OPEN.format(columns))
+                opened, seen_columns = True, True
+        elif opened:
+            output.append(COLUMN_CLOSE)
+            opened = False
+        output.append(item['text'])
+    if opened:
+        output.append(COLUMN_CLOSE)
+    return '\n\n'.join(output)+'\n'
 
 
 def drop_running_headers(source, pages):

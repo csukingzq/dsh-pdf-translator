@@ -85,6 +85,43 @@ class StructuredPipelineTests(unittest.TestCase):
                dict(blocks=[self.block('段落',2,continues_previous=True)])]
         self.assertIn('跨页[^p1-1]段落',assemble(pages,None,Path('.')))
 
+    def two_column_pdf(self, path):
+        """A page whose text really sits in two columns, so the grid is detected."""
+        words='dense reconstruction from uncalibrated images without camera poses'.split()
+        with pymupdf.open() as doc:
+            page=doc.new_page(width=612,height=792)
+            for column,left in enumerate((50,322)):
+                for line in range(20):
+                    text=' '.join(words[(line+column*3) % len(words):][:5])
+                    page.insert_text((left,70+line*15),text,fontsize=10,fontname='helv')
+            doc.save(path)
+        return Path(path)
+
+    def test_two_column_page_marks_column_runs(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path=self.two_column_pdf(Path(folder)/'two.pdf')
+            title=self.block('通栏标题'); title['bbox']=[0.2,0.05,0.8,0.09]
+            left=self.block('左栏正文'); left['bbox']=[0.08,0.2,0.47,0.5]; left['id']='p1-b2'
+            right=self.block('右栏正文'); right['bbox']=[0.51,0.2,0.91,0.5]; right['id']='p1-b3'
+            text=assemble([dict(blocks=[title,left,right])],path,Path(folder))
+            self.assertTrue(text.startswith('通栏标题\n\n<!-- translator-columns: 2 -->'))
+            self.assertIn('左栏正文\n\n右栏正文',text)
+            self.assertTrue(text.rstrip().endswith('<!-- translator-columns-end -->'))
+
+    def test_single_column_document_has_no_column_markers(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/'one.pdf'
+            with pymupdf.open() as doc:
+                page=doc.new_page(width=612,height=792)
+                for line in range(20):
+                    page.insert_text((50,70+line*15),'single column body text line',fontsize=10,fontname='helv')
+                doc.save(path)
+            pages=[dict(blocks=[self.block('正文一'),self.block('正文二')]),
+                   dict(blocks=[self.block('正文三')])]
+            text=assemble(pages,path,Path(folder))
+            self.assertNotIn('translator-columns',text)
+            self.assertNotIn('translator-float',text)
+
     def test_page_quality_and_render_format(self):
         with tempfile.TemporaryDirectory() as folder:
             folder=Path(folder)
