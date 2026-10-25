@@ -172,6 +172,62 @@ $$\sum_{i=0}^n x_i\tag{2.49}$$
             self.assertEqual(tex.count('(2.7)'), 1)
             self.assertEqual(counts['display_math'], 1)
 
+    def test_two_columns_use_the_class_option_and_full_width_floats(self):
+        # Two columns stay one continuous flow, so a wide element floats to the
+        # top of a page and the text keeps filling the page it left.
+        source = ('<!-- translator-columns: 2 -->\n\n左栏正文。\n\n'
+                  '<!-- translator-float: figure -->\n\n![](figure.png)\n\n图 1 题注\n\n'
+                  '<!-- translator-float-end -->\n\n<!-- translator-columns-end -->\n')
+        with tempfile.TemporaryDirectory() as folder:
+            project = Path(folder)
+            (project/'figure.png').write_bytes(b'fixture')
+            counts = build_project(source, project, project)
+            tex = (project/'main.tex').read_text('utf-8')
+            self.assertEqual(counts['columns'], 2)
+            self.assertRegex(tex, r'\\documentclass\[[^\]]*twocolumn')
+            self.assertIn(r'\begin{figure*}[t]', tex)
+            self.assertNotIn(r'\begin{multicols*', tex)
+
+    def test_three_columns_use_multicols_regions(self):
+        source = ('<!-- translator-columns: 3 -->\n\n三段正文。\n\n'
+                  '<!-- translator-columns-end -->\n')
+        with tempfile.TemporaryDirectory() as folder:
+            project = Path(folder)
+            counts = build_project(source, project, project)
+            tex = (project/'main.tex').read_text('utf-8')
+            self.assertEqual(counts['columns'], 3)
+            self.assertIn(r'\begin{multicols*}{3}', tex)
+            self.assertNotIn('twocolumn', tex.split(r'\begin{document}')[0].split('documentclass')[1][:80])
+
+    def test_wide_table_is_scaled_instead_of_overflowing(self):
+        header = ' | '.join('列'+str(index) for index in range(8))
+        rule = ' | '.join(['---']*8)
+        row = ' | '.join(['147.1 px']*8)
+        source = '| ' + header + ' |\n| ' + rule + ' |\n| ' + row + ' |\n'
+        with tempfile.TemporaryDirectory() as folder:
+            output = Path(folder)/'wide.pdf'
+            render_latex(source, Path(folder), output)
+            self.assertTrue(output.is_file())
+            project = output.with_suffix('')
+            tex = (project/'main.tex').read_text('utf-8')
+            self.assertIn(r'\begin{adjustbox}{max width=\linewidth}', tex)
+            self.assertNotIn(r'\begin{longtable}', tex)
+            report = json.loads((project/'render-report.json').read_text('utf-8'))
+            self.assertEqual(report['overfull_boxes_pt'], [])
+            self.assertEqual(report['fitted_tables'], 1)
+
+    def test_dingbats_render_through_the_fallback_font(self):
+        # These glyphs are absent from Times New Roman; a missing character used
+        # to abort the whole translation.
+        source = '正确性 ✓，错误 ✗，方框 ☐，勾选框 ☑，箭头 →，编号 ①。\n'
+        with tempfile.TemporaryDirectory() as folder:
+            output = Path(folder)/'glyph.pdf'
+            render_latex(source, Path(folder), output)
+            self.assertTrue(output.is_file())
+            report = json.loads((output.with_suffix('')/'render-report.json').read_text('utf-8'))
+            self.assertEqual(report['missing_characters'], [])
+            self.assertEqual(report.get('unresolved_glyphs'), None)
+
 
 if __name__ == '__main__':
     unittest.main()
