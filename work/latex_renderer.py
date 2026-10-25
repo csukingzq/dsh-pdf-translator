@@ -563,6 +563,29 @@ TWO_COLUMN_TEX = (
 )
 
 
+REFERENCE_HEADING = re.compile(
+    r'\\(?:sub)?section\*?\{[^{}]*(?:参考文献|引用文献|References|Bibliography)[^{}]*\}')
+
+
+def shrink_references(tex):
+    """Set the bibliography in a smaller size, as the source paper does.
+
+    Only a heading in the last half of the *body* counts as the reference list,
+    so material after it (an appendix) is not shrunk by accident.
+    """
+    start = tex.find(r'\begin{document}')
+    end = tex.find(r'\end{document}')
+    if start < 0 or end < 0:
+        return tex
+    matches = [match for match in REFERENCE_HEADING.finditer(tex, start, end)]
+    if not matches:
+        return tex
+    heading = matches[-1]
+    if heading.start() < start + (end-start)*0.45:
+        return tex
+    return tex[:heading.end()] + r'\small' + tex[heading.end():]
+
+
 def apply_regions(tex, columns=1):
     """Turn the sentinels into the real layout.
 
@@ -846,6 +869,7 @@ def build_project(text, source_dir, project):
               + ['--include-in-header=layout.tex'], json.dumps(ast), cwd=project)
     tex = break_long_urls(tex)
     tex = apply_regions(tex, counts['columns'])
+    tex = shrink_references(tex)
     tex, counts['fitted_tables'], counts['table_lines'] = fit_tables(tex)
     (project/'main.tex').write_text(tex, encoding='utf-8')
     (project/'README.txt').write_text(

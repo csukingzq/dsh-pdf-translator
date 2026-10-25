@@ -228,6 +228,28 @@ $$\sum_{i=0}^n x_i\tag{2.49}$$
             self.assertEqual(report['missing_characters'], [])
             self.assertEqual(report.get('unresolved_glyphs'), None)
 
+    def test_reference_list_is_set_smaller(self):
+        # The source paper sets the bibliography smaller; a translated run that
+        # keeps body size turns 3 pages of references into 8.
+        body = '正文段落。'*600
+        source = (body+'\n\n## 参考文献\n\n' + '\n\n'.join('[%d] Author. Title. In CVPR, 2020.' % n
+                                                          for n in range(1, 30)) + '\n')
+        with tempfile.TemporaryDirectory() as folder:
+            project = Path(folder)
+            build_project(source, project, project)
+            tex = (project/'main.tex').read_text('utf-8')
+            heading = tex.index(r'\section{参考文献}') if r'\section{参考文献}' in tex else tex.index('参考文献}')
+            self.assertIn(r'\small', tex[heading:heading+120])
+
+    def test_heading_in_the_first_half_is_not_treated_as_references(self):
+        source = '## 参考文献\n\n[1] Author. Title.\n\n' + '正文段落。'*600 + '\n'
+        with tempfile.TemporaryDirectory() as folder:
+            project = Path(folder)
+            build_project(source, project, project)
+            tex = (project/'main.tex').read_text('utf-8')
+            body = tex.split(r'\begin{document}', 1)[1]
+            self.assertNotIn(r'\section{参考文献}\small', body)
+
 
 if __name__ == '__main__':
     unittest.main()
