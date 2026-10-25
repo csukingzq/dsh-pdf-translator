@@ -83,6 +83,16 @@ class ReviewTests(unittest.TestCase):
                 self.invoke('apply',pages=[self.page])
         self.assertEqual(before,self.snapshot())
 
+    def test_font_warning_survives_review_and_marks_result(self):
+        def render(text, cache, output):
+            self.render(text, cache, output)
+            review.save(output.with_suffix('')/'render-report.json',
+                        {'font_warnings': ['Missing character: U+1F984']})
+        with patch.object(review, 'render_latex', side_effect=render):
+            result = self.invoke('apply', pages=[self.page])
+        self.assertEqual(result['result']['status'], 'needs_review')
+        self.assertEqual(review.read(self.result['report'])['font_warnings'], ['Missing character: U+1F984'])
+
     def test_partial_publication_rolls_back_and_crash_recovery(self):
         transaction=self.root/'work'/'review-transactions'/'test'
         transaction.mkdir(parents=True)

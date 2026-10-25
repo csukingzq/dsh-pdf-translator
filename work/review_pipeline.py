@@ -167,9 +167,10 @@ def execute(request):
     rendering = read(project/'render-report.json')
     fallback = [b['id'] for p in revised for b in p['blocks'] if b.get('status')=='source_image' or b['kind']=='uncertain']
     report.update(source_image_units=fallback, layout_warnings=rendering.get('overfull_accepted',[]),
+                  font_warnings=rendering.get('font_warnings',rendering.get('missing_characters',[])),
                   notes_without_marker=len(rendering.get('unresolved_note_fragments',[])),
                   issues=[{'block':b,'reason':'保留原图，需要人工确认','status':'source_image'} for b in fallback])
-    report['status'] = 'needs_review' if fallback or report['layout_warnings'] or report['notes_without_marker'] else 'complete'
+    report['status'] = 'needs_review' if fallback or report['layout_warnings'] or report['font_warnings'] or report['notes_without_marker'] else 'complete'
     report['ai_review'] = {'status':'reviewing','rounds':request['round'],'backup':str(transaction/'journal.json')}
     doc['pages'] = revised
     doc['layout'] = layout

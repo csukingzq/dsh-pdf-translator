@@ -80,6 +80,22 @@ class AiOnlyTests(unittest.TestCase):
             self.assertIsNone(report['ocr'])
             self.assertEqual(report['formula_review']['mode'], 'ai')
 
+    def test_font_warning_marks_translation_for_review(self):
+        source = Path(__file__).resolve().parent.parent/'tests/fixtures/vision-sample.pdf'
+        cfg = {'base_url':'https://example.invalid/v1','api_key':'unused','model':'vision'}
+        data = {'complete':True,'blocks':[{'kind':'paragraph','bbox':[.1,.2,.8,.3],'markdown':'中文'}]}
+        def render(text, cache, output):
+            output = Path(output)
+            output.write_bytes(source.read_bytes())
+            project = output.with_suffix(''); project.mkdir(parents=True, exist_ok=True)
+            (project/'main.tex').write_text(text, encoding='utf-8')
+            (project/'render-report.json').write_text(json.dumps({'font_warnings':['Missing character: U+1F984']}), encoding='utf-8')
+        with tempfile.TemporaryDirectory() as folder, patch.object(pipeline, 'request_page', return_value=data), patch.object(pipeline, 'render_latex', side_effect=render):
+            result = pipeline.run_document(source, 'all', cfg, workers=1, data_dir=folder)
+            self.assertEqual(result['status'], 'needs_review')
+            report = json.loads(Path(result['report']).read_text('utf-8'))
+            self.assertEqual(report['font_warnings'], ['Missing character: U+1F984'])
+
 
 if __name__ == '__main__':
     unittest.main()

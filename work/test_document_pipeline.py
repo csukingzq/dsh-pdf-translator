@@ -68,6 +68,16 @@ class StructuredPipelineTests(unittest.TestCase):
             self.assertTrue(text.startswith('~~~~text'))
             self.assertIn('a_b = x*y',text)
 
+    def test_html_code_indentation_is_decoded(self):
+        with patch('document_pipeline.source_is_code', return_value=True):
+            text = block_markdown(self.block('<pre>if x<br>&nbsp;&nbsp;y=1;</pre>'), Path('source.pdf'), Path('.'))
+        self.assertEqual(text, '~~~~text\nif x\n  y=1;\n~~~~')
+
+    def test_cross_page_code_fences_join_on_newline(self):
+        pages = [dict(blocks=[self.block('~~~~text\nif x\n  y=1;\n~~~~', continues_next=True)]),
+                 dict(blocks=[self.block('~~~~text\nend\n~~~~', 2, continues_previous=True)])]
+        self.assertEqual(assemble(pages, None, Path('.')), '~~~~text\nif x\n  y=1;\nend\n~~~~\n')
+
 
     def test_continuations_and_page_scoped_notes(self):
         pages=[dict(blocks=[self.block('跨页',continues_next=True)]),

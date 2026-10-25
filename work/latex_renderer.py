@@ -37,7 +37,7 @@ def layout_error_context(project, engine_log):
     regions = json.loads((project/'math-regions.json').read_text('utf-8'))
     lines = (project/'main.tex').read_text('utf-8').splitlines()
     for match in re.finditer(r'Overfull \\hbox \(([0-9.]+)pt too wide\).*?at lines (\d+)--(\d+)', engine_log):
-        if float(match[1]) <= 2:
+        if float(match[1]) <= SEVERE_OVERFULL_PT:
             continue
         source = '\n'.join(lines[int(match[2])-1:int(match[3])])
         ids = set(re.findall(r'TRANSLATOR-MATH-BEGIN:(\d+)', source))
@@ -54,21 +54,44 @@ def layout_error_context(project, engine_log):
             return {**regions[int(events[-1][1])], 'kind': 'layout', 'error': match[0]}
     return None
 
+# 译文里会原样保留证明结束符、勾选符号等字符，而西文字体（Times New Roman、
+# TeX Gyre Termes）没有这些字形；xelatex 因此报 Missing character 并让整篇
+# 排版判定失败。这里统一换成数学字体里的等价字形，保证任何字体环境都能编译。
+UNICODE_SYMBOLS = {
+    '\u2610': r'\square',        # ☐
+    '\u2605': r'\bigstar',       # ★
+    '\u220e': r'\blacksquare',   # ∎ 证明结束
+    '\u25c6': r'\blacklozenge',  # ◆
+    '\u25c7': r'\lozenge',       # ◇
+    '\u2713': r'\checkmark',     # ✓
+    '\u2714': r'\checkmark',     # ✔
+}
+UNICODE_SYMBOL_RULES = ''.join(
+    '\\newunicodechar{' + char + '}{\\ensuremath{' + macro + '}}\n'
+    for char, macro in UNICODE_SYMBOLS.items())
+
 HEADER = r"""
 \usepackage{xeCJK}
+\xeCJKsetup{AutoFallBack=true}
 % 本机有 Windows 字体时保持原样；Overleaf 等缺少这些字体的环境自动退回
 % TeX Live 自带字体（Fandol、TeX Gyre Termes），因此同一个 main.tex 到处可编译。
 \IfFontExistsTF{Times New Roman}{\setmainfont{Times New Roman}}{%
   \setmainfont[Extension=.otf,UprightFont=*-regular,BoldFont=*-bold,ItalicFont=*-italic,BoldItalicFont=*-bolditalic]{texgyretermes}}
+\IfFontExistsTF{Arial}{\setsansfont{Arial}}{\setsansfont{texgyreheros-regular.otf}}
+\IfFontExistsTF{Consolas}{\setmonofont{Consolas}}{\setmonofont{lmmono10-regular.otf}}
 \IfFontExistsTF{SimSun}{%
   \setCJKmainfont[AutoFakeBold=2]{SimSun}%
-  \setCJKsansfont{Microsoft YaHei}%
   \setCJKmonofont{SimSun}%
 }{%
   \setCJKmainfont[AutoFakeBold=2,ItalicFont=FandolSong-Regular.otf,BoldItalicFont=FandolSong-Regular.otf]{FandolSong-Regular.otf}%
-  \setCJKsansfont[AutoFakeBold=2,ItalicFont=FandolHei-Regular.otf,BoldItalicFont=FandolHei-Regular.otf]{FandolHei-Regular.otf}%
   \setCJKmonofont{FandolSong-Regular.otf}%
 }
+\IfFontExistsTF{Microsoft YaHei}{\setCJKsansfont{Microsoft YaHei}}{%
+  \setCJKsansfont[AutoFakeBold=2,ItalicFont=FandolHei-Regular.otf,BoldItalicFont=FandolHei-Regular.otf]{FandolHei-Regular.otf}}
+\IfFontExistsTF{SimSun-ExtB}{%
+  \setCJKfallbackfamilyfont{\CJKrmdefault}{SimSun-ExtB}%
+  \setCJKfallbackfamilyfont{\CJKsfdefault}{SimSun-ExtB}%
+  \setCJKfallbackfamilyfont{\CJKttdefault}{SimSun-ExtB}}{}
 \usepackage{amsmath,amssymb,mathtools}
 % bm redefines boldsymbol using legacy mathchar primitives, incompatible
 % with Unicode math. Select Unicode bold italic vector/Greek glyphs directly.
@@ -76,9 +99,7 @@ HEADER = r"""
 \renewcommand{\boldsymbol}[1]{\symbfit{#1}}
 \providecommand{\bm}[1]{\boldsymbol{#1}}
 \usepackage{newunicodechar}
-\newunicodechar{☐}{\ensuremath{\square}}
-\newunicodechar{★}{\ensuremath{\bigstar}}
-\usepackage{graphicx,adjustbox}
+@@UNICODE-SYMBOL-RULES@@\usepackage{graphicx,adjustbox}
 \usepackage{fancyhdr}
 \usepackage{needspace}
 \usepackage{indentfirst}
@@ -86,6 +107,11 @@ HEADER = r"""
 \titleformat{\section}{\Large\sffamily\bfseries}{}{0pt}{}
 \titleformat{\subsection}{\large\sffamily\bfseries}{}{0pt}{}
 \titleformat{\subsubsection}{\normalsize\sffamily\bfseries}{}{0pt}{}
+\titleformat{\paragraph}[hang]{\normalsize\sffamily\bfseries}{}{0pt}{}
+\titleformat{\subparagraph}[hang]{\normalsize\sffamily\bfseries}{}{0pt}{}
+\usepackage{fvextra}
+\DefineVerbatimEnvironment{Highlighting}{Verbatim}{commandchars=\\\{\},breaklines,breakanywhere}
+\DefineVerbatimEnvironment{verbatim}{Verbatim}{breaklines,breakanywhere}
 \setlength{\parindent}{2em}
 \setlength{\parskip}{0.35em}
 \linespread{1.22}
@@ -99,6 +125,14 @@ HEADER = r"""
 \clubpenalty=10000
 \setcounter{secnumdepth}{-1}
 \newsavebox{\displaybox}
+\newsavebox{\inlinebox}
+\newcommand{\InlineMath}[1]{%
+  \sbox{\inlinebox}{$#1$}%
+  \ifdim\wd\inlinebox>\linewidth
+    \typeout{LATEX-TRANSLATOR: scaled wide inline}%
+    \unskip\hfil\break\noindent
+    \adjustbox{max width=\linewidth}{\usebox{\inlinebox}}\hfil\break
+  \else\(#1\)\fi}
 \newcommand{\DisplayMath}[2]{%
   \par\addvspace{0.65\baselineskip}\noindent
   \sbox{\displaybox}{$\displaystyle #1$}%
@@ -110,7 +144,7 @@ HEADER = r"""
       \adjustbox{max width=\dimexpr\linewidth-4em\relax}{\usebox{\displaybox}}}%
     \makebox[4em][r]{#2}}%
   \par\addvspace{0.65\baselineskip}}
-"""
+""".replace('@@UNICODE-SYMBOL-RULES@@', UNICODE_SYMBOL_RULES)
 
 
 def binaries():
@@ -306,8 +340,6 @@ def build_project(text, source_dir, project):
     prepared = prepare_html(text, pandoc, tables)
     prepared = inline_footnote_math(prepared)
     ast = json.loads(run([pandoc, '-f', 'markdown-raw_tex+tex_math_single_backslash', '-t', 'json'], prepared))
-    heading_levels = [b['c'][0] for b in ast['blocks'] if b.get('t') == 'Header']
-    heading_shift = min(heading_levels, default=1) - 1
     # MinerU can emit a display as a one-formula paragraph followed by its number.
     merged = []
     for block in ast['blocks']:
@@ -379,8 +411,15 @@ def build_project(text, source_dir, project):
                              + r'\adjustbox{max width=\linewidth,max height=' + str(layout.get('figureMaxHeight',.45)) + r'\textheight}{\includegraphics{'
                              + figure['image'] + r'}}\par' + '\n' + figure['caption'] + '\n' + r'\end{minipage}')
             return {'t':'RawBlock','c':['latex',r'\par\noindent' + r'\hfill'.join(cells) + r'\par']}
-        if kind == 'Header':
-            content[0] -= heading_shift
+        if kind == 'Str' and any(is_math_symbol(c) for c in content):
+            # Let unicode-math select mathematical glyphs instead of text fonts.
+            parts = []
+            for part in re.split(r'([\u2100-\u214f\u2190-\u22ff\u27c0-\u27ef\u2a00-\u2aff\U0001d400-\U0001d7ff])', content):
+                if len(part) == 1 and is_math_symbol(part):
+                    parts.append({'t': 'RawInline', 'c': ['latex', r'\ensuremath{' + part + '}']})
+                elif part:
+                    parts.append({'t': 'Str', 'c': part})
+            return {'t': 'Span', 'c': [['', [], []], parts]}
         if kind == 'Para' and len(content) == 1 and content[0].get('t') == 'Image':
             keep_caption = ['keep-with-caption','true'] in content[0]['c'][0][2]
             picture = visit(content[0])
@@ -402,7 +441,7 @@ def build_project(text, source_dir, project):
             # Retain source footnote markers for the later binding pass.
             if re.fullmatch(r'\^(?:\{\d+\}|\d+)', value.strip()):
                 return {'t': 'Math', 'c': [content[0], value]}
-            return {'t': 'RawInline', 'c': ['latex', start + r'\(' + value + r'\)' + end]}
+            return {'t': 'RawInline', 'c': ['latex', start + r'\InlineMath{' + value + '}' + end]}
         if kind == 'Image':
             target = content[2][0]
             match = re.fullmatch(r'data:image/(png|jpeg|jpg);base64,([A-Za-z0-9+/=\s]+)', target)
@@ -510,7 +549,9 @@ def build_project(text, source_dir, project):
     size = layout.get('fontSize',11)
     font_override = ('\n'+r'\AtBeginDocument{\fontsize{'+str(size)+'pt}{'+str(round(size*1.2,1))+r'pt}\selectfont}') if 'fontSize' in layout else ''
     (project/'layout.tex').write_text(HEADER+font_override, encoding='utf-8')
-    tex = run([pandoc, '-f', 'json', '-t', 'latex', '-s', '--pdf-engine=xelatex',
+    # The bundled fvextra cannot break inside Pandoc's syntax token macros.
+    # Plain verbatim preserves code and permits wrapping on every long line.
+    tex = run([pandoc, '-f', 'json', '-t', 'latex', '-s', '--pdf-engine=xelatex', '--no-highlight',
                '-V', f"fontsize={layout.get('fontSize',11)}pt",
                '-V', 'geometry:margin=24mm', '-V', 'papersize=a4',
                '-V', 'colorlinks=true', '-V', 'linkcolor=black',
@@ -525,12 +566,22 @@ def build_project(text, source_dir, project):
     return counts
 
 
-def render_latex(text, cache, output):
+def is_math_symbol(char):
+    point = ord(char)
+    return (0x2100 <= point <= 0x214f or 0x2190 <= point <= 0x22ff
+            or 0x27c0 <= point <= 0x27ef or 0x2a00 <= point <= 0x2aff
+            or 0x1d400 <= point <= 0x1d7ff)
+
+
+def render_latex(text, cache, output, *, strict_layout=False):
     output = Path(output)
     project = output.with_suffix('')
     with progress.spinner('生成 LaTeX 项目'):
         counts = build_project(text, cache, project)
     _, tectonic = binaries()
+    # A failed/retried run must never publish a PDF left by an older compile.
+    for name in ('main.pdf', 'main.log'):
+        (project/name).unlink(missing_ok=True)
     with progress.spinner('编译 PDF（tectonic）'):
         result = subprocess.run([tectonic, '--untrusted', '--keep-logs', 'main.tex'],
                                 cwd=project, capture_output=True, encoding='utf-8', errors='replace', timeout=600)
@@ -549,6 +600,7 @@ def render_latex(text, cache, output):
         raise LatexCompileError('LaTeX 编译失败：\n' + (summary or log[-1500:]) + '\n源文件和日志：' + str(project), context)
     engine_log = (project/'main.log').read_text('utf-8', errors='replace')
     counts['scaled_displays'] = engine_log.count('LATEX-TRANSLATOR: scaled wide display')
+    counts['scaled_inline_math'] = engine_log.count('LATEX-TRANSLATOR: scaled wide inline')
     counts['warnings'] = [line for line in log.splitlines() if 'warning:' in line.lower()]
     counts['overfull_boxes_pt'] = [float(n) for n in re.findall(r'Overfull \\[hv]box \(([0-9.]+)pt', engine_log)]
     counts['missing_characters'] = [line for line in engine_log.splitlines() if 'Missing character:' in line]
@@ -557,14 +609,16 @@ def render_latex(text, cache, output):
         print(f"脚注结构需复核：保留了 {len(counts['unresolved_note_fragments'])} 个无法确认归属的短片段，详见 {project/'render-report.json'}", flush=True)
     severe = [n for n in counts['overfull_boxes_pt'] if n > SEVERE_OVERFULL_PT]
     context = layout_error_context(project, engine_log) if (counts['missing_characters'] or severe) else None
-    if counts['missing_characters'] or (severe and context):
-        raise LatexLayoutError('LaTeX 排版检查发现缺字或内容严重越界，未更新最终 PDF。请检查：' + str(project/'render-report.json'), context)
+    counts['font_warnings'] = counts['missing_characters']
+    counts['overfull_accepted'] = severe
+    counts['status'] = 'needs_review' if counts['font_warnings'] or severe else 'complete'
+    (project/'render-report.json').write_text(json.dumps(counts, ensure_ascii=False, indent=2), encoding='utf-8')
+    if strict_layout and (counts['missing_characters'] or severe):
+        raise LatexLayoutError('LaTeX 严格排版检查未通过（缺字或内容越界）。请检查：' + str(project/'render-report.json'), context)
+    if counts['font_warnings']:
+        print(f"字体警告：{len(counts['font_warnings'])} 处字形缺失，已保留 PDF 并标记需复核；详见 {project/'render-report.json'}", flush=True)
     if severe:
-        # No block can be blamed (e.g. a long DOI in the bibliography): keep the
-        # compiled PDF and report it instead of failing the whole document.
-        counts['overfull_accepted'] = severe
-        (project/'render-report.json').write_text(json.dumps(counts, ensure_ascii=False, indent=2), encoding='utf-8')
-        print(f"排版警告：{len(severe)} 处越界无法定位到具体内容块（{', '.join(f'{n:g}pt' for n in severe)}），已保留 PDF；详见 render-report.json", flush=True)
+        print(f"排版警告：{len(severe)} 处内容越界（{', '.join(f'{n:g}pt' for n in severe)}），已保留 PDF 并标记需复核；详见 render-report.json", flush=True)
     try:
         shutil.copyfile(project/'main.pdf', output)
     except PermissionError as exc:

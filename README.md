@@ -136,6 +136,12 @@ zip 内是可直接用 XeLaTeX 或 Tectonic 编译的完整工程（`main.tex`�
 
 `main.tex` 的字体是条件选择的：本机有宋体 / Times New Roman 时保持原样，缺少时（如 Overleaf）自动改用 Fandol 和 TeX Gyre Termes。因此整个 zip 可以直接上传 Overleaf，编译器选 XeLaTeX 即可，不需要改字体；记得连同 `images/` 一起上传。
 
+标题在全文组装时统一校正：优先匹配原文 PDF 书签，结合章节编号和字体信息恢复层级；不会在每页重新从一级标题开始。定理标签、图题、程序输出等保留为正文。没有书签或文字层时，以明确编号为依据，未编号标题保留识别结果。
+
+正文、标题和代码字体分别检测并回退，数学 Unicode 符号使用数学字体。超宽公式限制到版心内，长代码自动折行，跨页代码保留换行和缩进。若编译成功但仍有缺字或严重越界，会保留 PDF 并将任务标为 `needs_review`，详情记录在任务报告的 `font_warnings` / `layout_warnings` 中；这类结果仍需检查。真正的 TeX 编译错误继续触发局部修复，不会用旧 PDF 冒充新结果。Python 调用方可用 `render_latex(..., strict_layout=True)` 要求排版警告阻止发布。
+
+已有翻译可通过 `renderOnly: true` 使用缓存重新排版，无需再次调用翻译模型。
+
 ## 数据与更新
 
 用户数据默认保存在：

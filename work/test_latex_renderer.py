@@ -3,11 +3,92 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from types import SimpleNamespace
 import latex_renderer
 from latex_renderer import build_project, safe_math, render_latex, break_long_urls
+from heading_structure import normalize_headings
 
 
 class LatexRendererTests(unittest.TestCase):
+    def test_heading_numbering_corrects_old_markdown(self):
+        with tempfile.TemporaryDirectory() as folder:
+            project = Path(folder)
+            titles = ['# 第3章 积分', '# 3.2 积分', '## 3.2.1 梯形法', '### 3.2 节', '# 3(c) 的图（N=50）']
+            pages = [{'blocks': [{'kind':'heading','markdown':title} for title in titles]}]
+            normalize_headings(pages)
+            build_project('\n\n'.join(b['markdown'] for b in pages[0]['blocks']), project, project)
+            tex = (project/'main.tex').read_text('utf-8')
+            self.assertIn(r'\subsection{3.2 积分}', tex)
+            self.assertIn(r'\subsubsection{3.2.1 梯形法}', tex)
+            self.assertIn(r'\textbf{3.2 节}', tex)
+            self.assertIn(r'\textbf{3(c)', tex)
+
+    def test_renderer_preserves_canonical_heading_levels(self):
+        with tempfile.TemporaryDirectory() as folder:
+            project = Path(folder)
+            build_project('### 3.2 自定义原文层级\n\n## 输出', project, project)
+            tex = (project/'main.tex').read_text('utf-8')
+            self.assertRegex(tex, r'\\subsubsection\{3\.2\s+自定义原文层级\}')
+            self.assertIn(r'\subsection{输出}', tex)
+
+    def test_mathematical_unicode_and_long_content_compile(self):
+        source = '数学符号 𝛼 ℝ ∑ → ∎。\n\n公式 $' + 'x+'*180 + '1$\n\n~~~~text\n' + 'long_identifier_'*40 + '\n~~~~\n'
+        with tempfile.TemporaryDirectory() as folder:
+            output = Path(folder)/'long.pdf'
+            render_latex(source, Path(folder), output, strict_layout=True)
+            report = json.loads((output.with_suffix('')/'render-report.json').read_text('utf-8'))
+            self.assertEqual(report['missing_characters'], [])
+            self.assertEqual(report['overfull_accepted'], [])
+            self.assertGreater(report['scaled_inline_math'], 0)
+
+    def compile_fixture(self, project, engine_log='', returncode=0, write_pdf=True):
+        def compile(*args, **kwargs):
+            (project/'main.log').write_text(engine_log, encoding='utf-8')
+            if write_pdf:
+                (project/'main.pdf').write_bytes(b'new pdf')
+            return SimpleNamespace(returncode=returncode, stdout='', stderr='error: broken' if returncode else '')
+        return compile
+
+    def test_layout_warnings_publish_with_report_and_strict_mode_preserves_output(self):
+        with tempfile.TemporaryDirectory() as folder:
+            output = Path(folder)/'out.pdf'; project = output.with_suffix(''); project.mkdir()
+            (project/'math-regions.json').write_text('[]', encoding='utf-8')
+            (project/'main.tex').write_text('text', encoding='utf-8')
+            log = 'Missing character: There is no 🦄 (U+1F984) in font test!\nOverfull \\hbox (30.0pt too wide) at lines 1--1\n'
+            with patch.object(latex_renderer, 'build_project', return_value={'unresolved_note_fragments': []}), \
+                 patch.object(latex_renderer, 'binaries', return_value=('pandoc', 'tectonic')), \
+                 patch.object(latex_renderer.subprocess, 'run', side_effect=self.compile_fixture(project, log)):
+                render_latex('text', Path(folder), output)
+                report = json.loads((project/'render-report.json').read_text('utf-8'))
+                self.assertEqual(report['status'], 'needs_review')
+                self.assertEqual(report['overfull_accepted'], [30])
+                self.assertTrue(report['font_warnings'])
+                output.write_bytes(b'previous accepted pdf')
+                with self.assertRaises(latex_renderer.LatexLayoutError):
+                    render_latex('text', Path(folder), output, strict_layout=True)
+                self.assertEqual(output.read_bytes(), b'previous accepted pdf')
+
+    def test_failed_compile_does_not_publish_stale_pdf(self):
+        for returncode in [0, 1]:
+            with self.subTest(returncode=returncode), tempfile.TemporaryDirectory() as folder:
+                output = Path(folder)/'out.pdf'; project = output.with_suffix(''); project.mkdir()
+                output.write_bytes(b'accepted pdf')
+                (project/'main.pdf').write_bytes(b'stale pdf')
+                with patch.object(latex_renderer, 'build_project', return_value={'unresolved_note_fragments': []}), \
+                     patch.object(latex_renderer, 'binaries', return_value=('pandoc', 'tectonic')), \
+                     patch.object(latex_renderer.subprocess, 'run', side_effect=self.compile_fixture(project, returncode=returncode, write_pdf=False)):
+                    with self.assertRaises(latex_renderer.LatexCompileError):
+                        render_latex('text', Path(folder), output)
+                self.assertEqual(output.read_bytes(), b'accepted pdf')
+
+    def test_layout_context_ignores_small_overflow_before_severe_one(self):
+        with tempfile.TemporaryDirectory() as folder:
+            project = Path(folder)
+            (project/'math-regions.json').write_text(json.dumps([{'id': 0, 'latex': 'wrong'}, {'id': 1, 'latex': 'right'}]), encoding='utf-8')
+            (project/'main.tex').write_text('TRANSLATOR-MATH-BEGIN:0\nTRANSLATOR-MATH-BEGIN:1', encoding='utf-8')
+            context = latex_renderer.layout_error_context(project, 'Overfull \\hbox (3.0pt too wide) at lines 1--1\nOverfull \\hbox (30.0pt too wide) at lines 2--2')
+            self.assertEqual(context['latex'], 'right')
+
     def test_bare_urls_get_break_points_but_url_commands_do_not(self):
         broken = break_long_urls('see https://doi.org/10.1016/j.apnum.2023.12.005 now')
         self.assertIn('https://doi', broken)
@@ -97,6 +178,17 @@ $$\boldsymbol{\sum_{i=1}^n y_i + \alpha}=\mathbf{A}\boldsymbol{y}$$
             self.assertNotIn('Extended mathchar used as mathchar', log)
             self.assertNotIn('Extended mathchar', log)
 
+    def test_proof_end_and_check_symbols_compile(self):
+        # Regression: 正文里的 ∎ 在 Times New Roman 中缺字形，xelatex 报
+        # Missing character 后整篇排版判定失败。
+        source = '这证明了 (4.8)，从而证明了 (4.7)。∎\n\n已完成 ✓，未完成 ◇。\n'
+        with tempfile.TemporaryDirectory() as folder:
+            output = Path(folder)/'symbols.pdf'
+            render_latex(source, Path(folder), output)
+            report = json.loads((output.with_suffix('')/'render-report.json').read_text('utf-8'))
+            self.assertTrue(output.is_file())
+            self.assertEqual(report['missing_characters'], [])
+
     def test_generated_preamble_falls_back_to_portable_fonts(self):
         # Overleaf has neither SimSun nor Times New Roman; the same main.tex must
         # still compile there by falling back to TeX Live fonts.
@@ -116,9 +208,9 @@ $$\boldsymbol{\sum_{i=1}^n y_i + \alpha}=\mathbf{A}\boldsymbol{y}$$
     def test_portable_fonts_compile_without_windows_fonts(self):
         # Simulate Overleaf: report every Windows font as missing and compile
         # with the TeX Live fallback fonts only, including emphasis and bold.
-        header = (latex_renderer.HEADER
-                  .replace(r'\IfFontExistsTF{SimSun}', r'\IfFontExistsTF{NoSuchWindowsFont}')
-                  .replace(r'\IfFontExistsTF{Times New Roman}', r'\IfFontExistsTF{NoSuchWindowsFont}'))
+        header = latex_renderer.HEADER
+        for name in ['SimSun', 'Times New Roman', 'Microsoft YaHei', 'Arial', 'Consolas', 'SimSun-ExtB']:
+            header = header.replace(r'\IfFontExistsTF{' + name + '}', r'\IfFontExistsTF{NoSuchWindowsFont}')
         self.assertNotEqual(header, latex_renderer.HEADER)
         with tempfile.TemporaryDirectory() as folder, patch.object(latex_renderer, 'HEADER', header):
             output = Path(folder)/'portable.pdf'
