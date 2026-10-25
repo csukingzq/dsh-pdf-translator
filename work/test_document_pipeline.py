@@ -97,7 +97,37 @@ class StructuredPipelineTests(unittest.TestCase):
             doc.save(path)
         return Path(path)
 
-    def test_two_column_page_marks_column_runs(self):
+    def test_caption_above_table_is_emitted_once_inside_the_float(self):
+        # Journal tables put the caption above the table; it has to travel inside
+        # the float, and must not also be emitted as body text.
+        caption = self.block('表 1. 结果对比。')
+        caption['id'], caption['bbox'] = 'p1-b2', [0.1, 0.10, 0.9, 0.13]
+        table = dict(kind='table', bbox=[0.1, 0.14, 0.9, 0.30], markdown='| A | B |\n|---|---|\n| 1 | 2 |',
+                     page=1, id='p1-b3')
+        body = self.block('正文')
+        body['id'], body['bbox'] = 'p1-b4', [0.1, 0.32, 0.9, 0.5]
+        text = assemble([dict(blocks=[caption, table, body])], None, Path('.'))
+        self.assertEqual(text.count('表 1. 结果对比。'), 1)
+        self.assertLess(text.index('<!-- translator-float: table -->'), text.index('表 1. 结果对比。'))
+        self.assertLess(text.index('表 1. 结果对比。'), text.index('| A | B |'))
+
+    def test_table_uses_a_single_float_queue(self):
+        # LaTeX orders single- and double-column floats separately, so every table
+        # in a two-column document has to use the same (spanning) queue.
+        with tempfile.TemporaryDirectory() as folder:
+            path = self.two_column_pdf(Path(folder)/'two.pdf')
+            narrow = dict(kind='table', bbox=[0.53, 0.2, 0.9, 0.3],
+                          markdown='| A | B |\n|---|---|\n| 1 | 2 |', page=1, id='p1-b2')
+            wide = dict(kind='table', bbox=[0.08, 0.6, 0.9, 0.7],
+                        markdown='| ' + ' | '.join('c%d' % n for n in range(9)) + ' |\n|'
+                                 + '---|' * 9 + '\n|' + ' 1 |' * 9, page=1, id='p1-b4')
+            page = [self.block('左栏正文'), narrow, self.block('右栏正文'), wide]
+            page[0]['bbox'], page[2]['bbox'] = [0.08, 0.1, 0.47, 0.2], [0.53, 0.1, 0.91, 0.2]
+            text = assemble([dict(blocks=page)], path, Path(folder))
+            self.assertEqual(text.count('<!-- translator-float: table-span -->'), 2)
+            self.assertNotIn('<!-- translator-float: table -->', text)
+
+
         with tempfile.TemporaryDirectory() as folder:
             path=self.two_column_pdf(Path(folder)/'two.pdf')
             title=self.block('通栏标题'); title['bbox']=[0.2,0.05,0.8,0.09]

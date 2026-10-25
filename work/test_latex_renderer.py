@@ -185,7 +185,7 @@ $$\sum_{i=0}^n x_i\tag{2.49}$$
             tex = (project/'main.tex').read_text('utf-8')
             self.assertEqual(counts['columns'], 2)
             self.assertRegex(tex, r'\\documentclass\[[^\]]*twocolumn')
-            self.assertIn(r'\begin{figure*}[!t]', tex)
+            self.assertIn(r'\begin{figure*}[!tp]', tex)
             self.assertNotIn(r'\begin{multicols*', tex)
 
     def test_three_columns_use_multicols_regions(self):
@@ -240,6 +240,28 @@ $$\sum_{i=0}^n x_i\tag{2.49}$$
             tex = (project/'main.tex').read_text('utf-8')
             heading = tex.index(r'\section{参考文献}') if r'\section{参考文献}' in tex else tex.index('参考文献}')
             self.assertIn(r'\small', tex[heading:heading+120])
+
+    def test_table_float_environment_follows_the_column_count(self):
+        # One queue per document: a spanning table uses the starred form, a table
+        # inside a column uses `here` so it cannot drift away from its caption.
+        single = ('<!-- translator-float: table -->\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n'
+                  '<!-- translator-float-end -->\n')
+        two = ('<!-- translator-columns: 2 -->\n\n左栏正文。\n\n'
+               '<!-- translator-float: table-span -->\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n'
+               '<!-- translator-float-end -->\n\n<!-- translator-columns-end -->\n')
+        with tempfile.TemporaryDirectory() as folder:
+            one = Path(folder)/'one'
+            one.mkdir()
+            build_project(single, one, one)
+            tex = (one/'main.tex').read_text('utf-8')
+            self.assertIn(r'\begin{table}[!htbp]', tex)
+            self.assertNotIn(r'\begin{table*}', tex)
+        with tempfile.TemporaryDirectory() as folder:
+            both = Path(folder)/'two'
+            both.mkdir()
+            build_project(two, both, both)
+            tex = (both/'main.tex').read_text('utf-8')
+            self.assertIn(r'\begin{table*}[!tp]', tex)
 
     def test_heading_in_the_first_half_is_not_treated_as_references(self):
         source = '## 参考文献\n\n[1] Author. Title.\n\n' + '正文段落。'*600 + '\n'

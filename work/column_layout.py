@@ -92,18 +92,14 @@ def _gutter(body, profile, low, high, share):
     return best
 
 
-def page_grid(page, blocks=None):
-    """Column count and gutter bands for one page."""
-    lines = _text_lines(page)
-    body = [line for line in lines if line[1]-line[0] < WIDE_LINE_RATIO]
-    if len(body) < MIN_BODY_LINES:
-        body = [line for line in _block_lines(blocks) if line[1]-line[0] < WIDE_BLOCK_RATIO]
+def _grid_from(body):
+    """Column grid from a set of horizontal extents (line or block boxes)."""
     if len(body) < 3:
-        return {'columns': 1, 'gutters': [], 'lines': len(body)}
+        return {'columns': 1, 'gutters': [], 'lines': len(body), 'found': False}
     profile = _profile(body)
     first = _gutter(body, profile, 0.22, 0.78, MIN_SIDE_SHARE)
     if first is None:
-        return {'columns': 1, 'gutters': [], 'lines': len(body)}
+        return {'columns': 1, 'gutters': [], 'lines': len(body), 'found': False}
     gutters = [first]
     # Three-column journals have a second gutter inside one of the halves.
     for low, high in ((0.0, first[0]), (first[1], 1.0)):
@@ -113,7 +109,28 @@ def page_grid(page, blocks=None):
             break
     gutters.sort()
     return {'columns': len(gutters)+1, 'gutters': [[round(a, 4), round(b, 4)] for a, b, _ in gutters],
-            'lines': len(body)}
+            'lines': len(body), 'found': True}
+
+
+def page_grid(page, blocks=None):
+    """Column count and gutter bands for one page.
+
+    The text layer is preferred because it follows the real baseline grid, but
+    some PDFs report every line as wide as the whole page (a broken text layer);
+    those pages fall back to the boxes the vision pass returned.
+    """
+    lines = _text_lines(page)
+    body = [line for line in lines if line[1]-line[0] < WIDE_LINE_RATIO]
+    boxes = [box for box in _block_lines(blocks) if box[1]-box[0] < WIDE_BLOCK_RATIO]
+    candidates = []
+    if len(body) >= MIN_BODY_LINES:
+        candidates.append(_grid_from(body))
+    if len(boxes) >= 3:
+        candidates.append(_grid_from(boxes))
+    for grid in candidates:
+        if grid['columns'] > 1:
+            return grid
+    return candidates[0] if candidates else {'columns': 1, 'gutters': [], 'lines': 0, 'found': False}
 
 
 def detect(source, pages=None):
@@ -132,12 +149,16 @@ def detect(source, pages=None):
         grids = {}
         for index in range(len(doc)):
             grids[index+1] = page_grid(doc[index], by_page.get(index))
-    votes = [grid['columns'] for grid in grids.values() if grid['lines'] >= MIN_BODY_LINES]
+    # A page speaks for the layout only when it either found a gutter or carried
+    # enough body rows to rule one out; cover pages and figure pages abstain.
+    confident = [grid for grid in grids.values()
+                 if grid['columns'] > 1 or grid['lines'] >= MIN_BODY_LINES]
+    votes = [grid['columns'] for grid in confident]
     columns = max(set(votes), key=votes.count) if votes else 1
     columns = min(columns, MAX_COLUMNS)
     if columns < 2:
         return {'columns': 1, 'gutters': [], 'pages': {p: g['columns'] for p, g in grids.items()}}
-    samples = [grid for grid in grids.values() if grid['columns'] == columns and grid['lines'] >= MIN_BODY_LINES]
+    samples = [grid for grid in confident if grid['columns'] == columns]
     gutters = []
     for slot in range(columns-1):
         edges = [grid['gutters'][slot] for grid in samples if len(grid['gutters']) > slot]

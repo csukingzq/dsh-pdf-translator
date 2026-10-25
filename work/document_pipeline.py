@@ -780,10 +780,12 @@ def reading_grid(pages, source, cache):
 
 
 def bind_captions(pages):
-    """Match every figure/table to the caption sitting right below it.
+    """Match every figure/table to its caption, above or below.
 
     The vision pass does not always keep a caption next to its block, and a
     caption that strays from a wide element ends up in a different column.
+    Journals put table captions above and figure captions below, so both sides
+    are checked: the caption has to travel inside the float.
     """
     bound = {}
     for data in pages:
@@ -795,21 +797,30 @@ def bind_captions(pages):
             best = None
             for caption in captions:
                 cap = caption['bbox']
-                gap = cap[1]-box[3]
                 overlap = min(box[2], cap[2])-max(box[0], cap[0])
-                if -0.01 <= gap <= 0.06 and overlap > 0.3*(box[2]-box[0]):
-                    if best is None or gap < best[0]:
-                        best = (gap, caption)
+                if overlap <= 0.3*(box[2]-box[0]):
+                    continue
+                below, above = cap[1]-box[3], box[1]-cap[3]
+                if -0.01 <= below <= 0.06:
+                    candidate = (below, 'below', caption)
+                elif -0.01 <= above <= 0.06:
+                    candidate = (above, 'above', caption)
+                else:
+                    continue
+                if best is None or candidate[0] < best[0]:
+                    best = candidate
             if best is not None:
-                bound[block['id']] = best[1]['id']
+                bound[block['id']] = (best[2]['id'], best[2])
     return bound
 
 
 def assemble(pages, source, cache, progress_bar=None):
     grid = reading_grid(pages, source, cache)
     columns = grid.get('columns', 1)
-    bound = bind_captions(pages) if columns > 1 else {}
-    by_id = {block['id']: block for data in pages for block in data['blocks']}
+    bound = bind_captions(pages)
+    # A caption sitting above its table is met before the table; the table emits
+    # it later, so the standalone copy has to be skipped instead of repeated.
+    caption_owner = {caption: owner for owner, (caption, _) in bound.items()}
     consumed = set()
 
     def spanning(block):
@@ -832,7 +843,7 @@ def assemble(pages, source, cache, progress_bar=None):
         index = 0
         while index < len(blocks):
             block = blocks[index]
-            if block['id'] in consumed:
+            if block['id'] in consumed or block['id'] in caption_owner:
                 index += 1
                 continue
             # 同一行左右并排的多张图：合并为一个 figure-row，渲染时并排而非堆叠。
@@ -871,11 +882,15 @@ def assemble(pages, source, cache, progress_bar=None):
                 parts[-1]['text'] += text
             else:
                 # A caption bound by position travels inside the same part, so a
-                # floating table or figure never loses its caption.
-                caption = bound.get(block['id'])
-                if caption and caption not in consumed and caption in by_id:
-                    text += '\n\n' + block_markdown(by_id[caption], source, cache)
-                    consumed.add(caption)
+                # floating table or figure never loses its caption. Journal
+                # tables put the caption above the table, figures below.
+                bound_caption = bound.get(block['id'])
+                if bound_caption and bound_caption[0] not in consumed:
+                    caption_id, caption_block = bound_caption
+                    caption_text = block_markdown(caption_block, source, cache)
+                    above = caption_block['bbox'][3] <= block['bbox'][1]+0.01
+                    text = (caption_text + '\n\n' + text) if above else (text + '\n\n' + caption_text)
+                    consumed.add(caption_id)
                 parts.append({'text': text, 'span': spanning(block),
                               'float': FLOAT_KINDS.get(block['kind']),
                               'caption': _is_caption(block)})
@@ -887,13 +902,25 @@ def assemble(pages, source, cache, progress_bar=None):
     while index < len(items):
         item = items[index]
         index += 1
-        # A wide figure or table is placed as a float so the text after it keeps
-        # filling the page instead of leaving the rest of the page blank.
-        if columns > 1 and seen_columns and item['span'] and item['float']:
+        # Tables become floats so they always travel with their caption: a page
+        # top if they span the page, `here` if they live inside one column.
+        # Figures only float when they are wider than a column.
+        name = None
+        if columns <= 2 and (columns > 1 or item['float'] == 'table'):
+            if columns == 2 and not seen_columns:
+                name = None                      # title block stays in place
+            elif item['float'] == 'table':
+                # One queue for every table: LaTeX orders single- and
+                # double-column floats independently, so mixing them inside one
+                # document lets a later table overtake an earlier one.
+                name = 'table-span' if columns == 2 else 'table'
+            elif item['float'] == 'figure' and columns == 2 and item['span']:
+                name = 'figure'
+        if name:
             if opened:
                 output.append(COLUMN_CLOSE)
                 opened = False
-            output.append(FLOAT_OPEN.format(item['float']))
+            output.append(FLOAT_OPEN.format(name))
             output.append(item['text'])
             # The caption may itself sit inside one column, but it belongs to
             # the wide element and has to float with it.

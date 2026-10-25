@@ -112,6 +112,9 @@ HEADER = r"""
 \newunicodechar{⟨}{\ensuremath{\langle}}
 \newunicodechar{⟩}{\ensuremath{\rangle}}
 \usepackage{graphicx,adjustbox,multicol}
+% 宽图表多时浮动队列会排到文末，甚至越过参考文献；用 FloatBarrier 在
+% 文献前清空队列。placeins 是 TeX Live 标准宏包。
+\IfFileExists{placeins.sty}{\usepackage{placeins}}{}
 \usepackage{fancyhdr}
 \usepackage{needspace}
 \usepackage{indentfirst}
@@ -541,26 +544,46 @@ def mark_regions(blocks):
     return out, columns
 
 
-REGION_TEX = (
-    (re.compile(r'\\typeout\{TRANSLATOR-COLUMNS-BEGIN:(\d+)\}'),
-     lambda match: '\n'+r'\begin{multicols*}{'+match[1]+'}'+'\n'),
-    (re.compile(r'\\typeout\{TRANSLATOR-COLUMNS-END\}'),
-     lambda match: '\n'+r'\end{multicols*}'+'\n'),
-    (re.compile(r'\\typeout\{TRANSLATOR-FLOAT-BEGIN:(figure|table)\}'),
-     lambda match: '\n'+r'\begin{'+match[1]+r'}[!t]\centering'+'\n'),
-    (re.compile(r'\\typeout\{TRANSLATOR-FLOAT-END:(figure|table)\}'),
-     lambda match: '\n'+r'\end{'+match[1]+'}'+'\n'),
-)
+def float_environment(name, columns):
+    """Environment for a float marker.
 
-# In `twocolumn` mode the body already flows in columns, so only the wide
-# elements need an environment, and they become full-width floats.
-TWO_COLUMN_TEX = (
-    (re.compile(r'\s*\\typeout\{TRANSLATOR-COLUMNS-(?:BEGIN:\d+|END)\}'), lambda match: ''),
-    (re.compile(r'\\typeout\{TRANSLATOR-FLOAT-BEGIN:(figure|table)\}'),
-     lambda match: '\n'+r'\begin{'+match[1]+r'*}[!t]\centering'+'\n'),
-    (re.compile(r'\\typeout\{TRANSLATOR-FLOAT-END:(figure|table)\}'),
-     lambda match: '\n'+r'\end{'+match[1]+r'*}'+'\n'),
-)
+    A table that spans the page uses the starred form (and can only sit at a
+    page top); a table inside one column uses the plain form, where `h` keeps it
+    next to its caption. Figures only float when they span.
+    """
+    if name == 'table-span':
+        starred = columns >= 2
+        base = 'table'
+    elif name == 'table':
+        starred, base = False, 'table'
+    else:
+        starred, base = columns >= 2, 'figure'
+    env = base + ('*' if starred else '')
+    return env, ('[!tp]' if starred else '[!htbp]')
+
+
+def region_patterns(columns):
+    """Sentinel replacements for the detected column count."""
+    patterns = []
+    if columns >= 3:
+        patterns.extend([
+            (re.compile(r'\\typeout\{TRANSLATOR-COLUMNS-BEGIN:(\d+)\}'),
+             lambda match: '\n'+r'\begin{multicols*}{'+match[1]+'}'+'\n'),
+            (re.compile(r'\\typeout\{TRANSLATOR-COLUMNS-END\}'),
+             lambda match: '\n'+r'\end{multicols*}'+'\n'),
+        ])
+    else:
+        # Two columns already flow; single column has no column flow at all.
+        patterns.append((re.compile(r'\s*\\typeout\{TRANSLATOR-COLUMNS-(?:BEGIN:\d+|END)\}'),
+                         lambda match: ''))
+    patterns.extend([
+        (re.compile(r'\\typeout\{TRANSLATOR-FLOAT-BEGIN:(table-span|table|figure)\}'),
+         lambda match: '\n'+r'\begin{'+float_environment(match[1], columns)[0]+'}'
+                       +float_environment(match[1], columns)[1]+r'\centering'+'\n'),
+        (re.compile(r'\\typeout\{TRANSLATOR-FLOAT-END:(table-span|table|figure)\}'),
+         lambda match: '\n'+r'\end{'+float_environment(match[1], columns)[0]+'}'+'\n'),
+    ])
+    return patterns
 
 
 REFERENCE_HEADING = re.compile(
@@ -571,7 +594,9 @@ def shrink_references(tex):
     """Set the bibliography in a smaller size, as the source paper does.
 
     Only a heading in the last half of the *body* counts as the reference list,
-    so material after it (an appendix) is not shrunk by accident.
+    so material after it (an appendix) is not shrunk by accident. Pending wide
+    floats are flushed before it, otherwise a full float queue spills tables out
+    behind the bibliography.
     """
     start = tex.find(r'\begin{document}')
     end = tex.find(r'\end{document}')
@@ -583,16 +608,18 @@ def shrink_references(tex):
     heading = matches[-1]
     if heading.start() < start + (end-start)*0.45:
         return tex
-    return tex[:heading.end()] + r'\small' + tex[heading.end():]
+    barrier = r'\FloatBarrier' if r'\usepackage{placeins}' in tex else ''
+    return tex[:heading.start()] + barrier + tex[heading.start():heading.end()] + r'\small' + tex[heading.end():]
 
 
 def apply_regions(tex, columns=1):
     """Turn the sentinels into the real layout.
 
     Two columns use the class option: the body then flows continuously, so a
-    wide figure or table can float to the top of a page and the text keeps
-    filling the page it left. Three or more columns use multicols regions,
-    because the class option only supports two.
+    wide table floats to the top of a page and the text keeps filling the page
+    it left. Three or more columns use multicols regions, because the class
+    option only supports two. A single-column document only floats tables, so a
+    caption is never stranded on the previous page.
     """
     if columns == 2:
         anchor = tex.index(r'\begin{document}')+len(r'\begin{document}')
@@ -600,17 +627,14 @@ def apply_regions(tex, columns=1):
         if first > anchor and tex[anchor:first].strip():
             # The title block belongs to the full width above both columns.
             tex = (tex[:anchor]+'\n'+r'\twocolumn[{' + tex[anchor:first] + '}]'+'\n'+tex[first:])
-        for pattern, replace in TWO_COLUMN_TEX:
-            tex = pattern.sub(replace, tex)
-        return tex
-    for pattern, replace in REGION_TEX:
+    for pattern, replace in region_patterns(columns):
         tex = pattern.sub(replace, tex)
     return tex
 
 
 COLUMN_MARK = re.compile(r'^<!--\s*translator-columns:\s*(\d+)\s*-->$', re.I)
 COLUMN_END = re.compile(r'^<!--\s*translator-columns-end\s*-->$', re.I)
-FLOAT_MARK = re.compile(r'^<!--\s*translator-float:\s*(figure|table)\s*-->$', re.I)
+FLOAT_MARK = re.compile(r'^<!--\s*translator-float:\s*(table-span|table|figure)\s*-->$', re.I)
 FLOAT_END = re.compile(r'^<!--\s*translator-float-end\s*-->$', re.I)
 
 
