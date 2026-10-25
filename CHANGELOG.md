@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.3 — 2026-10-25
+
+- 保留原 PDF 的栏结构：新增栏栅格识别（正文行墨迹剖面 + 栏缝递归拆分，支持 1/2/3 栏），按块坐标区分通栏与栏内内容。双栏文档用 `twocolumn` 流式排版，三栏用 `multicols` 区域，单栏文档行为不变。
+- 跨栏的宽图、宽表按浮动体排到页顶，正文继续填满当前页，不再出现半页空白；题注按原页几何位置绑定，随图表一起浮动。
+- 表格统一改写 pandoc 的 `longtable` 为 `adjustbox` + `tabular`：按可用宽度缩放，14 列宽表不再溢出，也不再产生“alignment 越界”并让整次输出失败。窄栏里的定宽列先按 1.6 倍宽度排版再缩放，避免每行一个字。
+- 缺字自动修复：常见勾选/方框/箭头字符映射到符号字体回退，编译后仍缺的字用 `newunicodechar` 逐字回退并重新编译（最多两轮，不消耗模型配额）。回退后仍缺的字只记入 `unresolved_glyphs` 并保留 PDF，不再让整次翻译失败。
+- 越界自检只在能定位到具体内容块时失败；已缩放的表格内部越界不再计入 `overfull_boxes_pt`，改记 `scaled_table_boxes`。
+- `layout.json` / `pdf_review apply.layout` 新增 `columns`（0=自动，1/2/3=强制栏数）。
+- 新增 `column_layout.py` 及其单测；`document_pipeline`、`latex_renderer` 增加栏标记、浮动体、表格适配、字形回退的回归用例。
+
 ## 0.4.2 — 2026-10-24
 
 - 模型配置对话框在接口地址为空时预填 `https://api.deepseek.com/v1`，避免把 placeholder 误当成已填写而无法点保存。
