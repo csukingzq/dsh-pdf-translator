@@ -38,6 +38,7 @@ table 完整重建为 Markdown 表格，合并单元格使用 HTML table（rowsp
 figure 的 markdown 写图内文字、图例和坐标轴标签的中文对照说明（没有可翻译文字则为空）；程序仅按你给定的坐标保留原图，并在图下呈现说明。图题另作 paragraph 翻译。uncertain 的 markdown 留空。
 脚注用 Markdown 引用 [^编号] 放在正文对应位置；footnote 的 markdown 为 [^编号]: 完整译文，包括其中公式。
 若脚注延续到相邻页，在当前页给出完整脚注且不要在下一页重复；正文不可把脚注当作段落。
+参考文献、引用条目（References / Bibliography）保持原文：作者名、文献标题、会议或期刊名、卷期页码、年份一律不翻译，按原顺序原样输出为 paragraph，只保留编号（如 [12]）与原文字；没有参考文献标题时也不要自行添加。
 只在确实跨页续接的正文段落设置 continues_previous/continues_next。不能猜测看不清的符号，使用 uncertain 单独框定局部。
 数学环境仅用 aligned、gathered、array、matrix、cases 等，不要使用 equation、align、宏定义或文件命令。
 多行公式每行的原编号紧跟该行末尾使用 \\tag{编号}；整个公式共用一个编号则放在最外层环境之后。cases 的条件列用 \\text{中文条件}，不要在中文文字中混入数学对齐符。

@@ -131,17 +131,61 @@ HEADER = r"""
 \widowpenalty=10000
 \clubpenalty=10000
 \setcounter{secnumdepth}{-1}
+% 双栏论文的宽图表可能比栏高，默认比例限制会让它们无法落页、一路漂到文末。
+\setcounter{topnumber}{3}
+\setcounter{dbltopnumber}{3}
+\renewcommand{\topfraction}{0.95}
+\renewcommand{\dbltopfraction}{0.95}
+\renewcommand{\textfraction}{0.05}
+\renewcommand{\floatpagefraction}{0.75}
 \newsavebox{\displaybox}
+\newlength{\formulawidth}
+% 公式比栏宽时不再整体缩小（会看不清），改为按关系符断行、保持原字号。
+% 带 array/aligned 的多行公式不能断行，仍用 \DisplayMathFit 等比缩放。
 \newcommand{\DisplayMath}[2]{%
-  \par\addvspace{0.65\baselineskip}\noindent
+  \par\addvspace{0.65\baselineskip}%
   \sbox{\displaybox}{$\displaystyle #1$}%
-  \ifdim\wd\displaybox>\dimexpr\linewidth-4em\relax
+  \setlength{\formulawidth}{\dimexpr\linewidth-4em\relax}%
+  \ifdim\wd\displaybox>\dimexpr 1.12\formulawidth\relax
+    \typeout{LATEX-TRANSLATOR: broken wide display}%
+    \begingroup
+      \leftskip=0pt plus 1fil \rightskip=0pt plus 1fil \parfillskip=0pt\relax
+      \noindent$\displaystyle #1$\par
+    \endgroup
+    \ifx\relax#2\relax\else
+      \begingroup\parfillskip=0pt\relax
+        \noindent\hfill\makebox[4em][r]{#2}\par
+      \endgroup
+    \fi
+  \else
+    \noindent\makebox[\linewidth]{%
+      \ifdim\wd\displaybox>\formulawidth
+        \typeout{LATEX-TRANSLATOR: scaled wide display}%
+        \makebox[\formulawidth]{\adjustbox{max width=\formulawidth}{\usebox{\displaybox}}}%
+        \makebox[4em][r]{#2}%
+      \else
+        \ifx\relax#2\relax
+          \usebox{\displaybox}%
+        \else
+          \makebox[\formulawidth]{\usebox{\displaybox}}\makebox[4em][r]{#2}%
+        \fi
+      \fi}%
+  \fi
+  \par\addvspace{0.65\baselineskip}}
+\newcommand{\DisplayMathFit}[2]{%
+  \par\addvspace{0.65\baselineskip}%
+  \sbox{\displaybox}{$\displaystyle #1$}%
+  \setlength{\formulawidth}{\dimexpr\linewidth-4em\relax}%
+  \ifdim\wd\displaybox>\formulawidth
     \typeout{LATEX-TRANSLATOR: scaled wide display}%
   \fi
-  \makebox[\linewidth]{%
-    \makebox[\dimexpr\linewidth-4em\relax]{%
-      \adjustbox{max width=\dimexpr\linewidth-4em\relax}{\usebox{\displaybox}}}%
-    \makebox[4em][r]{#2}}%
+  \noindent\makebox[\linewidth]{%
+    \ifx\relax#2\relax
+      \adjustbox{max width=\formulawidth}{\usebox{\displaybox}}%
+    \else
+      \makebox[\formulawidth]{\adjustbox{max width=\formulawidth}{\usebox{\displaybox}}}%
+      \makebox[4em][r]{#2}%
+    \fi}%
   \par\addvspace{0.65\baselineskip}}
 """
 
@@ -249,6 +293,15 @@ def remove_tags(value):
     return ''.join(parts), tags
 
 
+# Bodies that carry their own line structure cannot be broken at a relation, so
+# they are scaled to the measure instead of being re-flowed.
+FIT_BODY = re.compile(r'\\(?:begin\{(?:array|aligned|alignedat|gathered|split|[pbBvV]?matrix|cases|smallmatrix)\}|substack)')
+
+
+def display_command(body):
+    return r'\DisplayMathFit' if FIT_BODY.search(body) else r'\DisplayMath'
+
+
 def display_math(value):
     outer = re.fullmatch(r'\s*\\begin\{(aligned|gathered)\}(.*?)\\end\{\1\}\s*', value, re.S)
     if outer and r'\tag' in outer[2]:
@@ -261,14 +314,14 @@ def display_math(value):
             body = r'\begin{aligned}'+body+r'\end{aligned}' if len(math_cells(body))>1 else body
             label = tags[0] if tags else ''
             lines.append(r'\displaystyle '+body+r' & \displaystyle '+label)
-        return r'\DisplayMath{\begin{array}{r@{\quad}l}'+r' \\ '.join(lines)+r'\end{array}}{}'
+        return r'\DisplayMathFit{\begin{array}{r@{\quad}l}'+r' \\ '.join(lines)+r'\end{array}}{}'
     body, tags = remove_tags(value)
     if len(tags)>1:
         raise ValueError('无法定位多个公式编号的所属行，请检查译文。')
     label = tags[0] if tags else ''
     if label and not re.fullmatch(r'[\w.()\- ]+', label):
         label = r'\ensuremath{'+label+'}'
-    return r'\DisplayMath{'+body+'}{'+label+'}'
+    return display_command(body)+'{'+body+'}{'+label+'}'
 
 
 def prepare_html(text, pandoc, tables=None):
@@ -383,6 +436,22 @@ def spec_columns(spec):
     return count
 
 
+LONGTABLE_HOOK = re.compile(r'\\(?:endfirsthead|endhead|endfoot|endlastfoot)\b')
+
+
+def split_longtable(body):
+    """Split pandoc's longtable body into head, rows and the closing footer.
+
+    pandoc writes `head \\endhead  \\bottomrule \\endlastfoot  rows`, i.e. the
+    repeated footer is emitted *before* the rows. Keeping it there put a double
+    rule under the header and dropped the table's closing rule.
+    """
+    pieces = LONGTABLE_HOOK.split(body)
+    if len(pieces) == 1:
+        return '', pieces[0], ''
+    return pieces[0], pieces[-1], ''.join(pieces[1:-1])
+
+
 def fit_tables(tex):
     """Rewrite pandoc's longtable into a scalable tabular.
 
@@ -416,8 +485,10 @@ def fit_tables(tex):
             close = _group(body, match.end()-1)
             caption = body[match.start():close]
             body = body[:match.start()]+body[close:]
-        # Page-break hooks of longtable have no meaning inside a tabular.
-        body = re.sub(r'\\(?:endhead|endfirsthead|endfoot|endlastfoot)\b', '', body)
+        # Page-break hooks of longtable have no meaning inside a tabular, and its
+        # footer block (the repeated rule, placed before the rows) has to become
+        # the closing rule of the single-piece table instead.
+        head, body, foot = split_longtable(body)
         height = r',max totalheight=0.9\textheight' if body.count(r'\\') > TALL_TABLE_ROWS else ''
         # Inside a single column proportional fixed-width columns are crushed
         # into one word per line; a wider measure scaled back down keeps them.
@@ -430,12 +501,12 @@ def fit_tables(tex):
         if narrow:
             out.append(r'\begin{minipage}{'+str(NARROW_TABLE_SCALE)+r'\linewidth}'+'\n')
         out.append(r'\begin{tabular}{'+spec+'}'+'\n')
-        out.append(body.strip()+'\n')
+        out.append('\n'.join(part.strip() for part in (head, body, foot) if part.strip())+'\n')
         out.append(r'\end{tabular}'+'\n')
         if narrow:
             out.append(r'\end{minipage}'+'\n')
         out.append(r'\end{adjustbox}')
-        ranges.append([line, line+body.count('\n')+4])
+        ranges.append([line, ''.join(out).count('\n')+1])
         fitted += 1
         pos = end+len(r'\end{longtable}')
     out.append(tex[pos:])
@@ -476,7 +547,7 @@ REGION_TEX = (
     (re.compile(r'\\typeout\{TRANSLATOR-COLUMNS-END\}'),
      lambda match: '\n'+r'\end{multicols*}'+'\n'),
     (re.compile(r'\\typeout\{TRANSLATOR-FLOAT-BEGIN:(figure|table)\}'),
-     lambda match: '\n'+r'\begin{'+match[1]+r'}[t]\centering'+'\n'),
+     lambda match: '\n'+r'\begin{'+match[1]+r'}[!t]\centering'+'\n'),
     (re.compile(r'\\typeout\{TRANSLATOR-FLOAT-END:(figure|table)\}'),
      lambda match: '\n'+r'\end{'+match[1]+'}'+'\n'),
 )
@@ -486,7 +557,7 @@ REGION_TEX = (
 TWO_COLUMN_TEX = (
     (re.compile(r'\s*\\typeout\{TRANSLATOR-COLUMNS-(?:BEGIN:\d+|END)\}'), lambda match: ''),
     (re.compile(r'\\typeout\{TRANSLATOR-FLOAT-BEGIN:(figure|table)\}'),
-     lambda match: '\n'+r'\begin{'+match[1]+r'*}[t]\centering'+'\n'),
+     lambda match: '\n'+r'\begin{'+match[1]+r'*}[!t]\centering'+'\n'),
     (re.compile(r'\\typeout\{TRANSLATOR-FLOAT-END:(figure|table)\}'),
      lambda match: '\n'+r'\end{'+match[1]+r'*}'+'\n'),
 )
@@ -503,7 +574,7 @@ def apply_regions(tex, columns=1):
     if columns == 2:
         anchor = tex.index(r'\begin{document}')+len(r'\begin{document}')
         first = tex.find(r'\typeout{TRANSLATOR-COLUMNS-BEGIN')
-        if first > anchor:
+        if first > anchor and tex[anchor:first].strip():
             # The title block belongs to the full width above both columns.
             tex = (tex[:anchor]+'\n'+r'\twocolumn[{' + tex[anchor:first] + '}]'+'\n'+tex[first:])
         for pattern, replace in TWO_COLUMN_TEX:

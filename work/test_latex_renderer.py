@@ -185,7 +185,7 @@ $$\sum_{i=0}^n x_i\tag{2.49}$$
             tex = (project/'main.tex').read_text('utf-8')
             self.assertEqual(counts['columns'], 2)
             self.assertRegex(tex, r'\\documentclass\[[^\]]*twocolumn')
-            self.assertIn(r'\begin{figure*}[t]', tex)
+            self.assertIn(r'\begin{figure*}[!t]', tex)
             self.assertNotIn(r'\begin{multicols*', tex)
 
     def test_three_columns_use_multicols_regions(self):
