@@ -62,7 +62,9 @@ class AiOnlyTests(unittest.TestCase):
         source = Path(__file__).resolve().parent.parent/'tests/fixtures/vision-sample.pdf'
         cfg = {'base_url':'https://example.invalid/v1','api_key':'test-key','model':'vision'}
         data = {'complete':True, 'blocks':[
-            {'kind':'table', 'bbox':[.1,.5,.9,.8], 'markdown':'| 时间 | 距离 |\n|---|---|\n|0|1|'}]}
+            # Tables keep the source language: the fixture page is English, so a
+            # table carried back in English must pass the language check.
+            {'kind':'table', 'bbox':[.1,.5,.9,.8], 'markdown':'| Time (s) | Distance (m) |\n|---|---|\n|0|1|'}]}
         def fake_render(text, cache, output):
             output = Path(output)
             output.write_bytes(source.read_bytes())
