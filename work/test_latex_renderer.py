@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 import latex_renderer
-from latex_renderer import build_project, safe_math, render_latex, break_long_urls
+from latex_renderer import build_project, safe_math, render_latex, break_long_urls, heal_glyphs, fit_tables
 
 
 class LatexRendererTests(unittest.TestCase):
@@ -228,6 +228,20 @@ $$\sum_{i=0}^n x_i\tag{2.49}$$
             self.assertEqual(report['missing_characters'], [])
             self.assertEqual(report.get('unresolved_glyphs'), None)
 
+    def test_each_healed_glyph_adds_exactly_one_line(self):
+        # The table ranges recorded by fit_tables are shifted by one line per
+        # healed character; if that stops being true the overfull boxes of a
+        # scaled table are blamed on the body and the render is rejected.
+        with tempfile.TemporaryDirectory() as folder:
+            project = Path(folder)
+            (project/'main.tex').write_text('\\begin{document}\n正文\n\\end{document}\n', 'utf-8')
+            before = (project/'main.tex').read_text('utf-8').count('\n')
+            heal_glyphs(project, ['✓', '⚡'])
+            tex = (project/'main.tex').read_text('utf-8')
+            self.assertEqual(tex.count('\n')-before, 2)
+            self.assertIn('\\newunicodechar{✓}', tex)
+            self.assertIn('\\newunicodechar{⚡}', tex)
+
     def test_reference_list_is_set_smaller(self):
         # The source paper sets the bibliography smaller; a translated run that
         # keeps body size turns 3 pages of references into 8.
@@ -262,6 +276,55 @@ $$\sum_{i=0}^n x_i\tag{2.49}$$
             build_project(two, both, both)
             tex = (both/'main.tex').read_text('utf-8')
             self.assertIn(r'\begin{table*}[!tp]', tex)
+
+    def test_wrapped_header_row_is_not_read_as_a_merged_cell(self):
+        # pandoc wraps a long header row over two physical lines. Read line by
+        # line, the wrapped half looked like an empty trailing cell, so the last
+        # group label was widened over it and its neighbour printed inside the
+        # same cell: "Acc." and "Comp." ended up stacked in one column.
+        table = ('<table><thead><tr><th></th><th colspan="3">Mean Distance (mm)</th>'
+                 '<th colspan="3">Percentage (&lt;1mm)</th><th colspan="3">Percentage (&lt;2mm)</th></tr>'
+                 '<tr><th></th><th>Acc.</th><th>Comp.</th><th><i>overall</i></th>'
+                 '<th>Acc.</th><th>Comp.</th><th><i>f-score</i></th>'
+                 '<th>Acc.</th><th>Comp.</th><th><i>f-score</i></th></tr></thead>'
+                 '<tbody><tr><td>Camp [3]</td><td>0.835</td><td>0.554</td><td>0.695</td>'
+                 '<td>71.75</td><td>64.94</td><td>66.31</td><td>84.83</td><td>67.82</td>'
+                 '<td>73.02</td></tr></tbody></table>\n')
+        with tempfile.TemporaryDirectory() as folder:
+            project = Path(folder)
+            build_project(table, project, project)
+            tex = (project/'main.tex').read_text('utf-8')
+            self.assertNotIn(r'\multicolumn{2}{c}{Acc.}', tex)
+            row = next(line for line in tex.split('\n') if r'Comp. & \emph{overall}' in line)
+            self.assertEqual(row.count('&'), 9)
+
+    def test_pipe_group_header_still_spans_its_columns(self):
+        # A pipe table cannot express a merged cell, so a group label is followed
+        # by empty columns. Reassembling wrapped rows must not switch that off.
+        source = '|  | 精度 |  | 速度 |  |\n|---|---|---|---|---|\n| A | 1 | 2 | 3 | 4 |\n'
+        with tempfile.TemporaryDirectory() as folder:
+            project = Path(folder)
+            build_project(source, project, project)
+            tex = (project/'main.tex').read_text('utf-8')
+            self.assertIn(r'\multicolumn{2}{c}{精度}', tex)
+            self.assertIn(r'\multicolumn{2}{c}{速度}', tex)
+
+    def test_many_p_columns_in_a_float_are_widened_before_scaling(self):
+        # pandoc gives every column of a 19-column table 1/19 of the measure,
+        # which is narrower than "23.08": at that width the neighbours print on
+        # top of each other. Typesetting wider and letting adjustbox scale back
+        # keeps the digits apart. A three-column table in a float keeps its size.
+        def table(columns):
+            spec = '>{\\raggedright\\arraybackslash}p{0.05\\linewidth}'*columns
+            row = ' & '.join(['1.23']*columns)
+            return '\n'.join([r'\begin{table*}',
+                              r'\begin{longtable}[]{@{}'+spec+'@{}}',
+                              r'\toprule', row+r' \\', r'\midrule', row+r' \\',
+                              r'\bottomrule', r'\end{longtable}', r'\end{table*}'])
+        wide, _, _ = fit_tables(table(12))
+        self.assertIn(r'\begin{minipage}{1.6\linewidth}', wide)
+        small, _, _ = fit_tables(table(3))
+        self.assertNotIn(r'\begin{minipage}', small)
 
     def test_heading_in_the_first_half_is_not_treated_as_references(self):
         source = '## 参考文献\n\n[1] Author. Title.\n\n' + '正文段落。'*600 + '\n'

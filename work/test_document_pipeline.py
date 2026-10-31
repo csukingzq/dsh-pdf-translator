@@ -8,9 +8,11 @@ from pathlib import Path
 from document_pipeline import (page_indices, validate, assemble, block_markdown,
                                page_quality, render_page, record_usage, take_usage, request_page,
                                split_heading_blocks, normalize_notes, adjust_boxes, check_numbered_equations,
+                               check_table_language, table_cells, PROMPT,
                                pages_hash, save_final_pages, load_final_pages, thinking_enabled,
                                run_document, drop_running_headers, merge_adjacent_headings,
-                               merge_bottom_notes, drop_page_footers, api)
+                               merge_bottom_notes, drop_page_footers, api,
+                               untranslated_pages, references_start, process_page)
 
 
 class StructuredPipelineTests(unittest.TestCase):
@@ -111,9 +113,9 @@ class StructuredPipelineTests(unittest.TestCase):
         self.assertLess(text.index('<!-- translator-float: table -->'), text.index('表 1. 结果对比。'))
         self.assertLess(text.index('表 1. 结果对比。'), text.index('| A | B |'))
 
-    def test_table_uses_a_single_float_queue(self):
-        # LaTeX orders single- and double-column floats separately, so every table
-        # in a two-column document has to use the same (spanning) queue.
+    def test_narrow_table_stays_inside_its_column(self):
+        # A table that fits one column used to be promoted to a page-wide float,
+        # which left a hole in the column and pushed it away from its text.
         with tempfile.TemporaryDirectory() as folder:
             path = self.two_column_pdf(Path(folder)/'two.pdf')
             narrow = dict(kind='table', bbox=[0.53, 0.2, 0.9, 0.3],
@@ -124,8 +126,39 @@ class StructuredPipelineTests(unittest.TestCase):
             page = [self.block('左栏正文'), narrow, self.block('右栏正文'), wide]
             page[0]['bbox'], page[2]['bbox'] = [0.08, 0.1, 0.47, 0.2], [0.53, 0.1, 0.91, 0.2]
             text = assemble([dict(blocks=page)], path, Path(folder))
-            self.assertEqual(text.count('<!-- translator-float: table-span -->'), 2)
-            self.assertNotIn('<!-- translator-float: table -->', text)
+            self.assertIn('<!-- translator-float: table -->', text)
+            self.assertIn('<!-- translator-float: table-span -->', text)
+            # The in-column table must not open a spanning float before the column.
+            self.assertLess(text.index('<!-- translator-columns: 2 -->'),
+                            text.index('<!-- translator-float: table -->'))
+            self.assertLess(text.index('<!-- translator-float: table -->'),
+                            text.index('<!-- translator-float: table-span -->'))
+
+    def test_three_column_table_leaves_the_column_region(self):
+        # multicols cannot contain floats, so a page-wide table has to close the
+        # column region, float, and let the pipeline reopen the region.
+        with tempfile.TemporaryDirectory() as folder:
+            folder = Path(folder)
+            path = folder/'three.pdf'
+            with pymupdf.open() as doc:
+                doc.new_page(width=595, height=842)
+                doc.save(path)
+            # A forced count is what the user picks in the panel; the detected
+            # grid of this blank page has nothing to offer.
+            cache = folder/'cache'
+            cache.mkdir()
+            (cache/'layout.json').write_text('{"columns": 3}', 'utf-8')
+            table = dict(kind='table', bbox=[0.07, 0.7, 0.93, 0.8],
+                         markdown='| ' + ' | '.join('c%d' % n for n in range(9)) + ' |\n|'
+                                  + '---|' * 9 + '\n|' + ' 1 |' * 9, page=1, id='p1-b2')
+            body = self.block('正文')
+            body['bbox'] = [0.05, 0.1, 0.30, 0.2]   # first column of three
+            text = assemble([dict(blocks=[body, table])], path, cache)
+            self.assertIn('<!-- translator-columns: 3 -->', text)
+            opened = text.index('<!-- translator-columns: 3 -->')
+            closed = text.index('<!-- translator-columns-end -->')
+            float_at = text.index('<!-- translator-float: table-span -->')
+            self.assertTrue(opened < closed < float_at)
 
 
         with tempfile.TemporaryDirectory() as folder:
@@ -363,6 +396,83 @@ class StructuredPipelineTests(unittest.TestCase):
 
 
 
+    def table_source(self, path, lines, fontname='helv'):
+        """A page whose text layer holds one table, for the language check."""
+        with pymupdf.open() as doc:
+            page = doc.new_page(width=400, height=600)
+            for row, text in enumerate(lines):
+                page.insert_text((40, 100+row*20), text, fontsize=10, fontname=fontname)
+            doc.save(path)
+        return Path(path)
+
+    def test_table_keeps_source_text(self):
+        # Tables are rebuilt in the source language: an English table must come
+        # back English, and the columns are never re-wrapped by a translation.
+        with tempfile.TemporaryDirectory() as folder:
+            source = self.table_source(Path(folder)/'source.pdf',
+                                       ['Subject Mean deviation', 'alpha 12.5 3.1', 'beta 7.25 0.85'])
+            data = {'complete':True, 'blocks':[dict(kind='table', bbox=[.05,.15,.95,.25],
+                    markdown='| Subject | Mean | deviation |\n|---|---|---|\n| alpha | 12.5 | 3.1 |')]}
+            self.assertIsNone(check_table_language(source, 0, data))
+
+    def test_translated_table_is_rejected(self):
+        # A translated cell is longer than the original and breaks the layout,
+        # so the page is rejected and the model is told to copy the cells.
+        with tempfile.TemporaryDirectory() as folder:
+            source = self.table_source(Path(folder)/'source.pdf',
+                                       ['Subject Mean deviation', 'alpha 12.5 3.1', 'beta 7.25 0.85'])
+            data = {'complete':True, 'blocks':[dict(kind='table', bbox=[.05,.15,.95,.25],
+                    markdown='| 学科名称 | 平均值 | 偏差值 |\n|---|---|---|\n| 阿尔法系数 | 12.5 | 3.1 |\n| 贝塔系数 | 7.25 | 0.85 |')]}
+            with self.assertRaises(ValueError):
+                check_table_language(source, 0, data)
+
+    def test_chinese_table_is_not_flagged(self):
+        # The rule is "keep the source language", not "force English": a table
+        # that really is Chinese in the PDF stays Chinese and passes.
+        with tempfile.TemporaryDirectory() as folder:
+            source = self.table_source(Path(folder)/'source.pdf',
+                                       ['学科名称 平均值 偏差值', '阿尔法系数 12.5 3.1'], fontname='china-s')
+            data = {'complete':True, 'blocks':[dict(kind='table', bbox=[.05,.15,.95,.25],
+                    markdown='| 学科名称 | 平均值 | 偏差值 |\n|---|---|---|\n| 阿尔法系数 | 12.5 | 3.1 |')]}
+            self.assertIsNone(check_table_language(source, 0, data))
+
+    def test_small_table_with_translated_header_is_rejected(self):
+        # A two-column table carries three characters of header at most, and the
+        # old twelve-character rule let a fully translated one through.
+        with tempfile.TemporaryDirectory() as folder:
+            source = self.table_source(Path(folder)/'source.pdf',
+                                       ['Group Accuracy', 'alpha 0.83', 'beta 0.29'])
+            data = {'complete':True, 'blocks':[dict(kind='table', bbox=[.05,.15,.95,.25],
+                    markdown='| 组 | 精度 |\n|---|---|\n| alpha | 0.83 |\n| beta | 0.29 |')]}
+            with self.assertRaises(ValueError):
+                check_table_language(source, 0, data)
+
+    def test_one_chinese_word_in_an_english_table_is_tolerated(self):
+        # The budget is measured against the source: one stray label must not send
+        # the whole page back through the model.
+        with tempfile.TemporaryDirectory() as folder:
+            source = self.table_source(Path(folder)/'source.pdf',
+                                       ['Subject Mean deviation', 'alpha 12.5 3.1', 'beta 7.25 0.85'])
+            data = {'complete':True, 'blocks':[dict(kind='table', bbox=[.05,.15,.95,.25],
+                    markdown='| Subject | Mean | deviation |\n|---|---|---|\n| alpha | 12.5 | 3.1 |\n'
+                             '| beta（中文） | 7.25 | 0.85 |')]}
+            self.assertIsNone(check_table_language(source, 0, data))
+
+    def test_table_cells_read_pipe_and_html_tables(self):
+        pipe = '| 方法 | RRA@15 |\n|---|---|\n| a | 1 |'
+        self.assertEqual(table_cells(pipe), ['方法', 'RRA@15', 'a', '1'])
+        html = '<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>'
+        self.assertEqual(table_cells(html), ['A', 'B', '1', '2'])
+        # A caption line above the table is a paragraph, never a cell.
+        self.assertEqual(table_cells('表 1. 精度\n\n| a | b |'), ['a', 'b'])
+
+    def test_prompt_forbids_translating_tables(self):
+        # The instruction is the whole mechanism: a table block must carry the
+        # original wording, never a translation.
+        self.assertIn('表格只重建结构', PROMPT)
+        self.assertIn('表格内容一律保留原文', PROMPT)
+        self.assertNotIn('翻译正文、图注、表格', PROMPT)
+
     def test_ai_first_pass_still_receives_no_extracted_text(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -376,6 +486,66 @@ class StructuredPipelineTests(unittest.TestCase):
             with patch('document_pipeline.request_page',return_value=response) as request:
                 process_page(source,0,root/'cache',None,'test',1)
             self.assertEqual(request.call_args.args[2:4],('', ''))
+
+    def test_echoed_english_body_page_is_flagged(self):
+        # A page the model echoed instead of translating used to pass silently;
+        # two English paragraphs prove the page, a short page does not.
+        with tempfile.TemporaryDirectory() as folder:
+            source = Path(folder)/'source.pdf'
+            with pymupdf.open() as doc:
+                page = doc.new_page(width=595, height=842)
+                page.insert_text((50, 70), 'Introduction body text', fontsize=10, fontname='helv')
+                doc.save(source)
+            english = ('the network predicts a depth map from the reference image and then refines it '
+                       'with a cost volume and several convolutions before the final output is produced '
+                       'and the differentiable homography warping encodes the camera geometry directly '
+                       'while the metric maps multiple features into one cost volume feature')
+            pages = [{'page':1,'blocks':[{'kind':'paragraph','bbox':[.1,.1,.9,.2],'markdown':english},
+                                         {'kind':'paragraph','bbox':[.1,.2,.9,.3],'markdown':english}]}]
+            self.assertEqual(untranslated_pages(source, pages), [1])
+            pages[0]['blocks'] = [{'kind':'paragraph','bbox':[.1,.1,.9,.2],'markdown':english}]
+            self.assertEqual(untranslated_pages(source, pages), [])
+
+    def test_reference_pages_stay_in_the_source_language(self):
+        # The bibliography is English by design: only pages before it may be
+        # flagged, and a page whose paragraphs are a numbered list is exempt too.
+        with tempfile.TemporaryDirectory() as folder:
+            source = Path(folder)/'source.pdf'
+            with pymupdf.open() as doc:
+                doc.new_page(width=595, height=842).insert_text((50, 70), 'Body text', fontsize=10, fontname='helv')
+                doc.new_page(width=595, height=842).insert_text((50, 70), 'References', fontsize=10, fontname='helv')
+                doc.new_page(width=595, height=842).insert_text((50, 70), '[1] Aanaes H.', fontsize=10, fontname='helv')
+                doc.save(source)
+            self.assertEqual(references_start(source), 2)
+            english = 'Zbontar J and LeCun Y stereo matching by training a convolutional network a b c d e f g h'
+            pages = [{'page':2,'blocks':[{'kind':'paragraph','bbox':[.1,.1,.9,.2],'markdown':english},
+                                         {'kind':'paragraph','bbox':[.1,.2,.9,.3],'markdown':english}]},
+                     {'page':3,'blocks':[{'kind':'paragraph','bbox':[.1,.1,.9,.9],
+                                          'markdown':'\n'.join(f'[{i}] Author A. Title. Journal, 2018.' for i in range(1, 8))}]}]
+            self.assertEqual(untranslated_pages(source, pages), [])
+
+    def test_retry_reason_bypasses_the_cached_page(self):
+        # The cache would hand back the identical echo, so a retried page must be
+        # re-read and the instruction must reach the model as the error argument.
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root/'source.pdf'
+            with pymupdf.open() as doc:
+                doc.new_page(width=595, height=842).insert_text((50, 70), 'Body text', fontsize=10, fontname='helv')
+                doc.save(source)
+            cache = root/'cache'
+            result = {'complete':True,'signature':'test','status':'translated',
+                      'blocks':[{'kind':'paragraph','bbox':[.1,.1,.9,.2],'markdown':'正文'}]}
+            path = cache/'pages/0001/result.json'
+            path.parent.mkdir(parents=True)
+            path.write_text(json.dumps(result), 'utf-8')
+            response = {'complete':True,'blocks':[{'kind':'paragraph','bbox':[.1,.1,.9,.2],'markdown':'中文正文'}]}
+            with patch('document_pipeline.request_page', return_value=response) as request:
+                page = process_page(source, 0, cache, None, 'test', 1,
+                                    retry_reason='第 1 页正文仍然是原文语言')
+            self.assertEqual(request.call_count, 1)
+            self.assertIn('第 1 页正文仍然是原文语言', request.call_args.args[4])
+            self.assertEqual(page['blocks'][0]['markdown'], '中文正文')
 
 
 if __name__=='__main__':

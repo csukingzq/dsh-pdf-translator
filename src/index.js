@@ -33,7 +33,7 @@ export function apply(ctx, config = {}) {
     exec.signal ? AbortSignal.any([exec.signal, controller.signal]) : controller.signal);
   ctx.tools.register(defineTool({
     name: 'pdf_translate',
-    description: '用视觉 AI 将 PDF 翻译成中文，输出中文 PDF 和 LaTeX 源码压缩包（zip）。正文、公式、图表边界与表格均由 AI 识别，不调用本地 OCR。图保留原样并在下方添加中文标签对照。输出目录每次都新建一个子文件夹，里面只有 PDF 与 LaTeX 源码 zip 两个文件。首次使用必须先准备运行环境并填写模型配置：失败时按提示引导用户打开 PDF 翻译面板完成，不要尝试在终端手改配置。调用会将选中页图片发送到配置的模型接口，可能耗时数分钟；建议先指定少量 pages。成功后遵循结果 completionPolicy；AI 核验关闭时仅简短提示已有警告，不继续读取或检查成果。',
+    description: '用视觉 AI 将 PDF 翻译成中文，输出中文 PDF 和 LaTeX 源码压缩包（zip）。正文、公式、图表边界与表格结构均由 AI 识别，不调用本地 OCR。表格只重建结构，单元格内容保留原文不翻译。图保留原样并在下方添加中文标签对照。输出目录每次都新建一个子文件夹，里面只有 PDF 与 LaTeX 源码 zip 两个文件。首次使用必须先准备运行环境并填写模型配置：失败时按提示引导用户打开 PDF 翻译面板完成，不要尝试在终端手改配置。调用会将选中页图片发送到配置的模型接口，可能耗时数分钟；建议先指定少量 pages。成功后遵循结果 completionPolicy；AI 核验关闭时仅简短提示已有警告，不继续读取或检查成果。',
     parameters: {
       pdf: { ...string, required: true, description: '本地 PDF 绝对路径' },
       pages: { ...string, description: 'all 或 1,3-5，默认 all' },

@@ -412,12 +412,19 @@ TALL_TABLE_ROWS = 25
 # once the table sits in a single column. Typeset those wider, then scale down.
 NARROW_TABLE_SCALE = 1.6
 NARROW_TABLE_COLUMNS = 4
+# Inside a float the same widening is only worth it when the columns carry
+# numbers rather than prose: pandoc gives every column of a 19-column table
+# 1/19 of the width, which is less than "23.08" needs, and the neighbours print
+# on top of each other. A four-column table in a float is fine as it is.
+CRUSHED_TABLE_COLUMNS = 8
 
 
 def in_float(tex, position):
-    """True when the offset sits inside one of the full-width float regions."""
-    opened = max(tex.rfind(r'\begin{figure*}', 0, position), tex.rfind(r'\begin{table*}', 0, position))
-    closed = max(tex.rfind(r'\end{figure*}', 0, position), tex.rfind(r'\end{table*}', 0, position))
+    """True when the offset sits inside a float, spanning or in-column."""
+    opened = max(tex.rfind(r'\begin{figure*}', 0, position), tex.rfind(r'\begin{table*}', 0, position),
+                 tex.rfind(r'\begin{figure}', 0, position), tex.rfind(r'\begin{table}', 0, position))
+    closed = max(tex.rfind(r'\end{figure*}', 0, position), tex.rfind(r'\end{table*}', 0, position),
+                 tex.rfind(r'\end{figure}', 0, position), tex.rfind(r'\end{table}', 0, position))
     return opened > closed
 
 
@@ -453,6 +460,100 @@ def split_longtable(body):
     if len(pieces) == 1:
         return '', pieces[0], ''
     return pieces[0], pieces[-1], ''.join(pieces[1:-1])
+
+
+def split_row_cells(row):
+    """Split a tabular row on the column separator, ignoring nested groups."""
+    cells, depth, current, index = [], 0, '', 0
+    while index < len(row):
+        char = row[index]
+        if char == '\\':
+            current += row[index:index+2]
+            index += 2
+            continue
+        if char == '{':
+            depth += 1
+        elif char == '}':
+            depth -= 1
+        if char == '&' and depth == 0:
+            cells.append(current)
+            current = ''
+        else:
+            current += char
+        index += 1
+    cells.append(current)
+    return cells
+
+
+def cell_spans(cells):
+    """Ranges covered by every cell, treating blanks between labels as a span.
+
+    A pipe table cannot express merged cells, so a group label sits in its first
+    column and the columns it covers are left empty. Read that way a model-written
+    header row carries the original grouping even though the markup lost it.
+    """
+    spans, index = [], 0
+    while index < len(cells):
+        span = 1
+        if cells[index].strip():
+            while index+span < len(cells) and not cells[index+span].strip():
+                span += 1
+        spans.append((index, span))
+        index += span
+    return spans
+
+
+def logical_rows(head):
+    """Join the physical lines pandoc wrapped back into whole table rows.
+
+    Reading a wrapped row line by line made its last, empty half look like a
+    merged cell, so the continuation line was glued to it and the row ended up
+    with one group header covering two columns. `%` at the end of a line is
+    pandoc's own line-break suppression: dropping it is what lets the halves of
+    a `\\multicolumn` argument join without a space.
+    """
+    rows, buffer = [], ''
+    for line in head.replace('%\n', '').split('\n'):
+        if buffer:
+            buffer = buffer.rstrip()+' '+line.strip()
+            if buffer.rstrip().endswith(r'\\'):
+                rows.append(buffer.rstrip())
+                buffer = ''
+        elif '&' in line and not line.rstrip().endswith(r'\\'):
+            buffer = line.rstrip()
+        else:
+            rows.append(line)
+    if buffer:
+        rows.append(buffer.rstrip())
+    return rows
+
+
+def widen_group_headers(head):
+    """Restore the column span of grouped header cells.
+
+    Only the header of the longtable is rewritten: a blank cell in a body row is
+    ordinary missing data and must not swallow its neighbours.
+    """
+    lines = []
+    for row in logical_rows(head):
+        text = row.rstrip()
+        tail = ''
+        if text.endswith(r'\\'):
+            text, tail = text[:-2].rstrip(), r' \\'
+        if '&' not in text:
+            lines.append(row)
+            continue
+        cells = split_row_cells(text)
+        spans = cell_spans(cells)
+        if not any(span > 1 for _, span in spans):
+            lines.append(row)
+            continue
+        built = []
+        for start, span in spans:
+            cell = cells[start].strip()
+            built.append(r'\multicolumn{%d}{c}{%s}' % (span, cell) if span > 1 else cell)
+        lines.append(' & '.join(built)+tail)
+    return '\n'.join(lines)
 
 
 def fit_tables(tex):
@@ -492,11 +593,14 @@ def fit_tables(tex):
         # footer block (the repeated rule, placed before the rows) has to become
         # the closing rule of the single-piece table instead.
         head, body, foot = split_longtable(body)
+        head = widen_group_headers(head)
         height = r',max totalheight=0.9\textheight' if body.count(r'\\') > TALL_TABLE_ROWS else ''
         # Inside a single column proportional fixed-width columns are crushed
         # into one word per line; a wider measure scaled back down keeps them.
-        narrow = ('p{' in spec and not in_float(tex, start)
-                  and spec_columns(spec) >= NARROW_TABLE_COLUMNS)
+        # A float only needs that when it carries enough columns to leave no
+        # room for a number: a small table in a float keeps its own size.
+        limit = CRUSHED_TABLE_COLUMNS if in_float(tex, start) else NARROW_TABLE_COLUMNS
+        narrow = 'p{' in spec and spec_columns(spec) >= limit
         out.append(tex[pos:start])
         out.append(r'\par\noindent'+(caption+r'\par\noindent' if caption else ''))
         line = ''.join(out).count('\n')+1
@@ -979,7 +1083,12 @@ def render_latex(text, cache, output):
             pending = [char for char in missing_glyphs(engine_log) if char not in healed]
             if not pending or not heal_glyphs(project, pending):
                 break
+            heated = pending
             healed.extend(pending)
+            # Healing adds one line per character above \begin{document}, so the
+            # table ranges recorded by fit_tables move down by that many lines.
+            counts['table_lines'] = [[low+len(heated), high+len(heated)]
+                                     for low, high in counts.get('table_lines', [])]
             code, log = compile_pdf(project, tectonic)
     if code or not (project/'main.pdf').exists():
         engine_log = (project/'main.log').read_text('utf-8', errors='replace') if (project/'main.log').exists() else ''
