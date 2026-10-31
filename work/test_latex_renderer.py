@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 from types import SimpleNamespace
 import latex_renderer
-from latex_renderer import build_project, safe_math, render_latex, break_long_urls
+from latex_renderer import build_project, safe_math, render_latex, break_long_urls, heal_glyphs, fit_tables
 from heading_structure import normalize_headings
 
 
@@ -263,6 +263,169 @@ $$\sum_{i=0}^n x_i\tag{2.49}$$
             self.assertIn(r'\DisplayMath{a+b=c}{(2.7)}', tex)
             self.assertEqual(tex.count('(2.7)'), 1)
             self.assertEqual(counts['display_math'], 1)
+
+    def test_two_columns_use_the_class_option_and_full_width_floats(self):
+        # Two columns stay one continuous flow, so a wide element floats to the
+        # top of a page and the text keeps filling the page it left.
+        source = ('<!-- translator-columns: 2 -->\n\n左栏正文。\n\n'
+                  '<!-- translator-float: figure -->\n\n![](figure.png)\n\n图 1 题注\n\n'
+                  '<!-- translator-float-end -->\n\n<!-- translator-columns-end -->\n')
+        with tempfile.TemporaryDirectory() as folder:
+            project = Path(folder)
+            (project/'figure.png').write_bytes(b'fixture')
+            counts = build_project(source, project, project)
+            tex = (project/'main.tex').read_text('utf-8')
+            self.assertEqual(counts['columns'], 2)
+            self.assertRegex(tex, r'\\documentclass\[[^\]]*twocolumn')
+            self.assertIn(r'\begin{figure*}[!tp]', tex)
+            self.assertNotIn(r'\begin{multicols*', tex)
+
+    def test_three_columns_use_multicols_regions(self):
+        source = ('<!-- translator-columns: 3 -->\n\n三段正文。\n\n'
+                  '<!-- translator-columns-end -->\n')
+        with tempfile.TemporaryDirectory() as folder:
+            project = Path(folder)
+            counts = build_project(source, project, project)
+            tex = (project/'main.tex').read_text('utf-8')
+            self.assertEqual(counts['columns'], 3)
+            self.assertIn(r'\begin{multicols*}{3}', tex)
+            self.assertNotIn('twocolumn', tex.split(r'\begin{document}')[0].split('documentclass')[1][:80])
+
+    def test_wide_table_is_scaled_instead_of_overflowing(self):
+        header = ' | '.join('列'+str(index) for index in range(8))
+        rule = ' | '.join(['---']*8)
+        row = ' | '.join(['147.1 px']*8)
+        source = '| ' + header + ' |\n| ' + rule + ' |\n| ' + row + ' |\n'
+        with tempfile.TemporaryDirectory() as folder:
+            output = Path(folder)/'wide.pdf'
+            render_latex(source, Path(folder), output)
+            self.assertTrue(output.is_file())
+            project = output.with_suffix('')
+            tex = (project/'main.tex').read_text('utf-8')
+            self.assertIn(r'\begin{adjustbox}{max width=\linewidth}', tex)
+            self.assertNotIn(r'\begin{longtable}', tex)
+            report = json.loads((project/'render-report.json').read_text('utf-8'))
+            self.assertEqual(report['overfull_boxes_pt'], [])
+            self.assertEqual(report['fitted_tables'], 1)
+
+    def test_dingbats_render_through_the_fallback_font(self):
+        # These glyphs are absent from Times New Roman; a missing character used
+        # to abort the whole translation.
+        source = '正确性 ✓，错误 ✗，方框 ☐，勾选框 ☑，箭头 →，编号 ①。\n'
+        with tempfile.TemporaryDirectory() as folder:
+            output = Path(folder)/'glyph.pdf'
+            render_latex(source, Path(folder), output)
+            self.assertTrue(output.is_file())
+            report = json.loads((output.with_suffix('')/'render-report.json').read_text('utf-8'))
+            self.assertEqual(report['missing_characters'], [])
+            self.assertEqual(report.get('unresolved_glyphs'), None)
+
+    def test_each_healed_glyph_adds_exactly_one_line(self):
+        # The table ranges recorded by fit_tables are shifted by one line per
+        # healed character; if that stops being true the overfull boxes of a
+        # scaled table are blamed on the body and the render is rejected.
+        with tempfile.TemporaryDirectory() as folder:
+            project = Path(folder)
+            (project/'main.tex').write_text('\\begin{document}\n正文\n\\end{document}\n', 'utf-8')
+            before = (project/'main.tex').read_text('utf-8').count('\n')
+            heal_glyphs(project, ['✓', '⚡'])
+            tex = (project/'main.tex').read_text('utf-8')
+            self.assertEqual(tex.count('\n')-before, 2)
+            self.assertIn('\\newunicodechar{✓}', tex)
+            self.assertIn('\\newunicodechar{⚡}', tex)
+
+    def test_reference_list_is_set_smaller(self):
+        # The source paper sets the bibliography smaller; a translated run that
+        # keeps body size turns 3 pages of references into 8.
+        body = '正文段落。'*600
+        source = (body+'\n\n## 参考文献\n\n' + '\n\n'.join('[%d] Author. Title. In CVPR, 2020.' % n
+                                                          for n in range(1, 30)) + '\n')
+        with tempfile.TemporaryDirectory() as folder:
+            project = Path(folder)
+            build_project(source, project, project)
+            tex = (project/'main.tex').read_text('utf-8')
+            heading = tex.index(r'\section{参考文献}') if r'\section{参考文献}' in tex else tex.index('参考文献}')
+            self.assertIn(r'\small', tex[heading:heading+120])
+
+    def test_table_float_environment_follows_the_column_count(self):
+        # One queue per document: a spanning table uses the starred form, a table
+        # inside a column uses `here` so it cannot drift away from its caption.
+        single = ('<!-- translator-float: table -->\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n'
+                  '<!-- translator-float-end -->\n')
+        two = ('<!-- translator-columns: 2 -->\n\n左栏正文。\n\n'
+               '<!-- translator-float: table-span -->\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n'
+               '<!-- translator-float-end -->\n\n<!-- translator-columns-end -->\n')
+        with tempfile.TemporaryDirectory() as folder:
+            one = Path(folder)/'one'
+            one.mkdir()
+            build_project(single, one, one)
+            tex = (one/'main.tex').read_text('utf-8')
+            self.assertIn(r'\begin{table}[!htbp]', tex)
+            self.assertNotIn(r'\begin{table*}', tex)
+        with tempfile.TemporaryDirectory() as folder:
+            both = Path(folder)/'two'
+            both.mkdir()
+            build_project(two, both, both)
+            tex = (both/'main.tex').read_text('utf-8')
+            self.assertIn(r'\begin{table*}[!tp]', tex)
+
+    def test_wrapped_header_row_is_not_read_as_a_merged_cell(self):
+        # pandoc wraps a long header row over two physical lines. Read line by
+        # line, the wrapped half looked like an empty trailing cell, so the last
+        # group label was widened over it and its neighbour printed inside the
+        # same cell: "Acc." and "Comp." ended up stacked in one column.
+        table = ('<table><thead><tr><th></th><th colspan="3">Mean Distance (mm)</th>'
+                 '<th colspan="3">Percentage (&lt;1mm)</th><th colspan="3">Percentage (&lt;2mm)</th></tr>'
+                 '<tr><th></th><th>Acc.</th><th>Comp.</th><th><i>overall</i></th>'
+                 '<th>Acc.</th><th>Comp.</th><th><i>f-score</i></th>'
+                 '<th>Acc.</th><th>Comp.</th><th><i>f-score</i></th></tr></thead>'
+                 '<tbody><tr><td>Camp [3]</td><td>0.835</td><td>0.554</td><td>0.695</td>'
+                 '<td>71.75</td><td>64.94</td><td>66.31</td><td>84.83</td><td>67.82</td>'
+                 '<td>73.02</td></tr></tbody></table>\n')
+        with tempfile.TemporaryDirectory() as folder:
+            project = Path(folder)
+            build_project(table, project, project)
+            tex = (project/'main.tex').read_text('utf-8')
+            self.assertNotIn(r'\multicolumn{2}{c}{Acc.}', tex)
+            row = next(line for line in tex.split('\n') if r'Comp. & \emph{overall}' in line)
+            self.assertEqual(row.count('&'), 9)
+
+    def test_pipe_group_header_still_spans_its_columns(self):
+        # A pipe table cannot express a merged cell, so a group label is followed
+        # by empty columns. Reassembling wrapped rows must not switch that off.
+        source = '|  | 精度 |  | 速度 |  |\n|---|---|---|---|---|\n| A | 1 | 2 | 3 | 4 |\n'
+        with tempfile.TemporaryDirectory() as folder:
+            project = Path(folder)
+            build_project(source, project, project)
+            tex = (project/'main.tex').read_text('utf-8')
+            self.assertIn(r'\multicolumn{2}{c}{精度}', tex)
+            self.assertIn(r'\multicolumn{2}{c}{速度}', tex)
+
+    def test_many_p_columns_in_a_float_are_widened_before_scaling(self):
+        # pandoc gives every column of a 19-column table 1/19 of the measure,
+        # which is narrower than "23.08": at that width the neighbours print on
+        # top of each other. Typesetting wider and letting adjustbox scale back
+        # keeps the digits apart. A three-column table in a float keeps its size.
+        def table(columns):
+            spec = '>{\\raggedright\\arraybackslash}p{0.05\\linewidth}'*columns
+            row = ' & '.join(['1.23']*columns)
+            return '\n'.join([r'\begin{table*}',
+                              r'\begin{longtable}[]{@{}'+spec+'@{}}',
+                              r'\toprule', row+r' \\', r'\midrule', row+r' \\',
+                              r'\bottomrule', r'\end{longtable}', r'\end{table*}'])
+        wide, _, _ = fit_tables(table(12))
+        self.assertIn(r'\begin{minipage}{1.6\linewidth}', wide)
+        small, _, _ = fit_tables(table(3))
+        self.assertNotIn(r'\begin{minipage}', small)
+
+    def test_heading_in_the_first_half_is_not_treated_as_references(self):
+        source = '## 参考文献\n\n[1] Author. Title.\n\n' + '正文段落。'*600 + '\n'
+        with tempfile.TemporaryDirectory() as folder:
+            project = Path(folder)
+            build_project(source, project, project)
+            tex = (project/'main.tex').read_text('utf-8')
+            body = tex.split(r'\begin{document}', 1)[1]
+            self.assertNotIn(r'\section{参考文献}\small', body)
 
 
 if __name__ == '__main__':

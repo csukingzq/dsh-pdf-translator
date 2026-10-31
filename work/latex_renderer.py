@@ -99,7 +99,39 @@ HEADER = r"""
 \renewcommand{\boldsymbol}[1]{\symbfit{#1}}
 \providecommand{\bm}[1]{\boldsymbol{#1}}
 \usepackage{newunicodechar}
-@@UNICODE-SYMBOL-RULES@@\usepackage{graphicx,adjustbox}
+@@UNICODE-SYMBOL-RULES@@% 正文里常出现的勾选/方框/箭头字符不在 Times New Roman 里，逐字改成
+% 符号字体回退，避免 XeTeX 直接报缺字。编译后仍缺的字由 heal_glyphs 追加。
+\IfFontExistsTF{Segoe UI Symbol}{%
+  \newfontfamily\symbolfont{Segoe UI Symbol}%
+}{%
+  \IfFontExistsTF{DejaVu Sans}{%
+    \newfontfamily\symbolfont{DejaVu Sans}%
+  }{%
+    \newfontfamily\symbolfont{FreeSerif}%
+  }%
+}
+\IfFontExistsTF{Microsoft YaHei}{%
+  \newCJKfontfamily\cjkfallback{Microsoft YaHei}%
+}{%
+  \newCJKfontfamily\cjkfallback{FandolSong-Regular.otf}%
+}
+\newcommand{\symbolchar}[1]{{\symbolfont #1}}
+\newcommand{\cjkchar}[1]{{\cjkfallback #1}}
+\newunicodechar{✗}{\symbolchar{✗}}
+\newunicodechar{✘}{\symbolchar{✘}}
+\newunicodechar{✕}{\symbolchar{✕}}
+\newunicodechar{☑}{\symbolchar{☑}}
+\newunicodechar{☒}{\symbolchar{☒}}
+\newunicodechar{▪}{\symbolchar{▪}}
+\newunicodechar{▫}{\symbolchar{▫}}
+\newunicodechar{▲}{\symbolchar{▲}}
+\newunicodechar{▼}{\symbolchar{▼}}
+\newunicodechar{⟨}{\ensuremath{\langle}}
+\newunicodechar{⟩}{\ensuremath{\rangle}}
+\usepackage{graphicx,adjustbox,multicol}
+% 宽图表多时浮动队列会排到文末，甚至越过参考文献；用 FloatBarrier 在
+% 文献前清空队列。placeins 是 TeX Live 标准宏包。
+\IfFileExists{placeins.sty}{\usepackage{placeins}}{}
 \usepackage{fancyhdr}
 \usepackage{needspace}
 \usepackage{indentfirst}
@@ -124,6 +156,13 @@ HEADER = r"""
 \widowpenalty=10000
 \clubpenalty=10000
 \setcounter{secnumdepth}{-1}
+% 双栏论文的宽图表可能比栏高，默认比例限制会让它们无法落页、一路漂到文末。
+\setcounter{topnumber}{3}
+\setcounter{dbltopnumber}{3}
+\renewcommand{\topfraction}{0.95}
+\renewcommand{\dbltopfraction}{0.95}
+\renewcommand{\textfraction}{0.05}
+\renewcommand{\floatpagefraction}{0.75}
 \newsavebox{\displaybox}
 \newsavebox{\inlinebox}
 \newcommand{\InlineMath}[1]{%
@@ -133,16 +172,53 @@ HEADER = r"""
     \unskip\hfil\break\noindent
     \adjustbox{max width=\linewidth}{\usebox{\inlinebox}}\hfil\break
   \else\(#1\)\fi}
+\newlength{\formulawidth}
+% 公式比栏宽时不再整体缩小（会看不清），改为按关系符断行、保持原字号。
+% 带 array/aligned 的多行公式不能断行，仍用 \DisplayMathFit 等比缩放。
 \newcommand{\DisplayMath}[2]{%
-  \par\addvspace{0.65\baselineskip}\noindent
+  \par\addvspace{0.65\baselineskip}%
   \sbox{\displaybox}{$\displaystyle #1$}%
-  \ifdim\wd\displaybox>\dimexpr\linewidth-4em\relax
+  \setlength{\formulawidth}{\dimexpr\linewidth-4em\relax}%
+  \ifdim\wd\displaybox>\dimexpr 1.12\formulawidth\relax
+    \typeout{LATEX-TRANSLATOR: broken wide display}%
+    \begingroup
+      \leftskip=0pt plus 1fil \rightskip=0pt plus 1fil \parfillskip=0pt\relax
+      \noindent$\displaystyle #1$\par
+    \endgroup
+    \ifx\relax#2\relax\else
+      \begingroup\parfillskip=0pt\relax
+        \noindent\hfill\makebox[4em][r]{#2}\par
+      \endgroup
+    \fi
+  \else
+    \noindent\makebox[\linewidth]{%
+      \ifdim\wd\displaybox>\formulawidth
+        \typeout{LATEX-TRANSLATOR: scaled wide display}%
+        \makebox[\formulawidth]{\adjustbox{max width=\formulawidth}{\usebox{\displaybox}}}%
+        \makebox[4em][r]{#2}%
+      \else
+        \ifx\relax#2\relax
+          \usebox{\displaybox}%
+        \else
+          \makebox[\formulawidth]{\usebox{\displaybox}}\makebox[4em][r]{#2}%
+        \fi
+      \fi}%
+  \fi
+  \par\addvspace{0.65\baselineskip}}
+\newcommand{\DisplayMathFit}[2]{%
+  \par\addvspace{0.65\baselineskip}%
+  \sbox{\displaybox}{$\displaystyle #1$}%
+  \setlength{\formulawidth}{\dimexpr\linewidth-4em\relax}%
+  \ifdim\wd\displaybox>\formulawidth
     \typeout{LATEX-TRANSLATOR: scaled wide display}%
   \fi
-  \makebox[\linewidth]{%
-    \makebox[\dimexpr\linewidth-4em\relax]{%
-      \adjustbox{max width=\dimexpr\linewidth-4em\relax}{\usebox{\displaybox}}}%
-    \makebox[4em][r]{#2}}%
+  \noindent\makebox[\linewidth]{%
+    \ifx\relax#2\relax
+      \adjustbox{max width=\formulawidth}{\usebox{\displaybox}}%
+    \else
+      \makebox[\formulawidth]{\adjustbox{max width=\formulawidth}{\usebox{\displaybox}}}%
+      \makebox[4em][r]{#2}%
+    \fi}%
   \par\addvspace{0.65\baselineskip}}
 """.replace('@@UNICODE-SYMBOL-RULES@@', UNICODE_SYMBOL_RULES)
 
@@ -250,6 +326,15 @@ def remove_tags(value):
     return ''.join(parts), tags
 
 
+# Bodies that carry their own line structure cannot be broken at a relation, so
+# they are scaled to the measure instead of being re-flowed.
+FIT_BODY = re.compile(r'\\(?:begin\{(?:array|aligned|alignedat|gathered|split|[pbBvV]?matrix|cases|smallmatrix)\}|substack)')
+
+
+def display_command(body):
+    return r'\DisplayMathFit' if FIT_BODY.search(body) else r'\DisplayMath'
+
+
 def display_math(value):
     outer = re.fullmatch(r'\s*\\begin\{(aligned|gathered)\}(.*?)\\end\{\1\}\s*', value, re.S)
     if outer and r'\tag' in outer[2]:
@@ -262,14 +347,14 @@ def display_math(value):
             body = r'\begin{aligned}'+body+r'\end{aligned}' if len(math_cells(body))>1 else body
             label = tags[0] if tags else ''
             lines.append(r'\displaystyle '+body+r' & \displaystyle '+label)
-        return r'\DisplayMath{\begin{array}{r@{\quad}l}'+r' \\ '.join(lines)+r'\end{array}}{}'
+        return r'\DisplayMathFit{\begin{array}{r@{\quad}l}'+r' \\ '.join(lines)+r'\end{array}}{}'
     body, tags = remove_tags(value)
     if len(tags)>1:
         raise ValueError('无法定位多个公式编号的所属行，请检查译文。')
     label = tags[0] if tags else ''
     if label and not re.fullmatch(r'[\w.()\- ]+', label):
         label = r'\ensuremath{'+label+'}'
-    return r'\DisplayMath{'+body+'}{'+label+'}'
+    return display_command(body)+'{'+body+'}{'+label+'}'
 
 
 def prepare_html(text, pandoc, tables=None):
@@ -318,13 +403,396 @@ def break_long_urls(tex):
     return re.sub(r'https?://[^\s{}]+', convert, tex)
 
 
+def _group(tex, index):
+    """Index just past the balanced group starting at `index`, which holds '{'."""
+    depth = 0
+    while index < len(tex):
+        char = tex[index]
+        if char == '\\':
+            index += 2
+            continue
+        if char == '{':
+            depth += 1
+        elif char == '}':
+            depth -= 1
+            if depth == 0:
+                return index+1
+        index += 1
+    raise ValueError('LaTeX 分组不完整。')
+
+
+def _tabular_spec(tex, index):
+    """Read the optional [..] and required {..} column spec of a table."""
+    while index < len(tex) and tex[index] in ' \t\n':
+        index += 1
+    if index < len(tex) and tex[index] == '[':
+        index = tex.index(']', index)+1
+        while index < len(tex) and tex[index] in ' \t\n':
+            index += 1
+    if index >= len(tex) or tex[index] != '{':
+        raise ValueError('无法识别表格列定义。')
+    end = _group(tex, index)
+    return index+1, end-1, end
+
+
+# A table taller than this cannot break across pages once it is a tabular, so
+# it is also scaled down to stay on one page.
+TALL_TABLE_ROWS = 25
+# Fixed-width columns measured against the text block wrap one word per line
+# once the table sits in a single column. Typeset those wider, then scale down.
+NARROW_TABLE_SCALE = 1.6
+NARROW_TABLE_COLUMNS = 4
+# Inside a float the same widening is only worth it when the columns carry
+# numbers rather than prose: pandoc gives every column of a 19-column table
+# 1/19 of the width, which is less than "23.08" needs, and the neighbours print
+# on top of each other. A four-column table in a float is fine as it is.
+CRUSHED_TABLE_COLUMNS = 8
+
+
+def in_float(tex, position):
+    """True when the offset sits inside a float, spanning or in-column."""
+    opened = max(tex.rfind(r'\begin{figure*}', 0, position), tex.rfind(r'\begin{table*}', 0, position),
+                 tex.rfind(r'\begin{figure}', 0, position), tex.rfind(r'\begin{table}', 0, position))
+    closed = max(tex.rfind(r'\end{figure*}', 0, position), tex.rfind(r'\end{table*}', 0, position),
+                 tex.rfind(r'\end{figure}', 0, position), tex.rfind(r'\end{table}', 0, position))
+    return opened > closed
+
+
+def spec_columns(spec):
+    """Column count of a tabular preamble, skipping filler and font arguments."""
+    count, index = 0, 0
+    while index < len(spec):
+        char = spec[index]
+        if char in '>@!<':
+            index += 1
+            while index < len(spec) and spec[index] in ' \t':
+                index += 1
+            if index < len(spec) and spec[index] == '{':
+                index = _group(spec, index)
+            continue
+        if char in 'lcrpmbX':
+            count += 1
+        index += 1
+    return count
+
+
+LONGTABLE_HOOK = re.compile(r'\\(?:endfirsthead|endhead|endfoot|endlastfoot)\b')
+
+
+def split_longtable(body):
+    """Split pandoc's longtable body into head, rows and the closing footer.
+
+    pandoc writes `head \\endhead  \\bottomrule \\endlastfoot  rows`, i.e. the
+    repeated footer is emitted *before* the rows. Keeping it there put a double
+    rule under the header and dropped the table's closing rule.
+    """
+    pieces = LONGTABLE_HOOK.split(body)
+    if len(pieces) == 1:
+        return '', pieces[0], ''
+    return pieces[0], pieces[-1], ''.join(pieces[1:-1])
+
+
+def split_row_cells(row):
+    """Split a tabular row on the column separator, ignoring nested groups."""
+    cells, depth, current, index = [], 0, '', 0
+    while index < len(row):
+        char = row[index]
+        if char == '\\':
+            current += row[index:index+2]
+            index += 2
+            continue
+        if char == '{':
+            depth += 1
+        elif char == '}':
+            depth -= 1
+        if char == '&' and depth == 0:
+            cells.append(current)
+            current = ''
+        else:
+            current += char
+        index += 1
+    cells.append(current)
+    return cells
+
+
+def cell_spans(cells):
+    """Ranges covered by every cell, treating blanks between labels as a span.
+
+    A pipe table cannot express merged cells, so a group label sits in its first
+    column and the columns it covers are left empty. Read that way a model-written
+    header row carries the original grouping even though the markup lost it.
+    """
+    spans, index = [], 0
+    while index < len(cells):
+        span = 1
+        if cells[index].strip():
+            while index+span < len(cells) and not cells[index+span].strip():
+                span += 1
+        spans.append((index, span))
+        index += span
+    return spans
+
+
+def logical_rows(head):
+    """Join the physical lines pandoc wrapped back into whole table rows.
+
+    Reading a wrapped row line by line made its last, empty half look like a
+    merged cell, so the continuation line was glued to it and the row ended up
+    with one group header covering two columns. `%` at the end of a line is
+    pandoc's own line-break suppression: dropping it is what lets the halves of
+    a `\\multicolumn` argument join without a space.
+    """
+    rows, buffer = [], ''
+    for line in head.replace('%\n', '').split('\n'):
+        if buffer:
+            buffer = buffer.rstrip()+' '+line.strip()
+            if buffer.rstrip().endswith(r'\\'):
+                rows.append(buffer.rstrip())
+                buffer = ''
+        elif '&' in line and not line.rstrip().endswith(r'\\'):
+            buffer = line.rstrip()
+        else:
+            rows.append(line)
+    if buffer:
+        rows.append(buffer.rstrip())
+    return rows
+
+
+def widen_group_headers(head):
+    """Restore the column span of grouped header cells.
+
+    Only the header of the longtable is rewritten: a blank cell in a body row is
+    ordinary missing data and must not swallow its neighbours.
+    """
+    lines = []
+    for row in logical_rows(head):
+        text = row.rstrip()
+        tail = ''
+        if text.endswith(r'\\'):
+            text, tail = text[:-2].rstrip(), r' \\'
+        if '&' not in text:
+            lines.append(row)
+            continue
+        cells = split_row_cells(text)
+        spans = cell_spans(cells)
+        if not any(span > 1 for _, span in spans):
+            lines.append(row)
+            continue
+        built = []
+        for start, span in spans:
+            cell = cells[start].strip()
+            built.append(r'\multicolumn{%d}{c}{%s}' % (span, cell) if span > 1 else cell)
+        lines.append(' & '.join(built)+tail)
+    return '\n'.join(lines)
+
+
+def fit_tables(tex):
+    """Rewrite pandoc's longtable into a scalable tabular.
+
+    longtable cannot be used inside multicols at all, and its natural width
+    overflows the text block when the source table has many columns. A tabular
+    inside adjustbox is scaled to whatever width is available: the column width
+    inside multicols, the text width outside.
+
+    Returns the source and the line ranges of the rewritten tables; an overfull
+    box inside one of them is scaled away by adjustbox, so it is not a defect.
+    """
+    out, pos, fitted, ranges, line = [], 0, 0, [], 0
+    while True:
+        start = tex.find(r'\begin{longtable}', pos)
+        if start < 0:
+            break
+        try:
+            spec_start, spec_end, body_start = _tabular_spec(tex, start+len(r'\begin{longtable}'))
+        except ValueError:
+            out.append(tex[pos:start+len(r'\begin{longtable}')])
+            pos = start+len(r'\begin{longtable}')
+            continue
+        end = tex.find(r'\end{longtable}', body_start)
+        if end < 0:
+            break
+        spec = tex[spec_start:spec_end]
+        body = tex[body_start:end]
+        caption = ''
+        match = re.search(r'\\caption(\*?)\s*\{', body)
+        if match:
+            close = _group(body, match.end()-1)
+            caption = body[match.start():close]
+            body = body[:match.start()]+body[close:]
+        # Page-break hooks of longtable have no meaning inside a tabular, and its
+        # footer block (the repeated rule, placed before the rows) has to become
+        # the closing rule of the single-piece table instead.
+        head, body, foot = split_longtable(body)
+        head = widen_group_headers(head)
+        height = r',max totalheight=0.9\textheight' if body.count(r'\\') > TALL_TABLE_ROWS else ''
+        # Inside a single column proportional fixed-width columns are crushed
+        # into one word per line; a wider measure scaled back down keeps them.
+        # A float only needs that when it carries enough columns to leave no
+        # room for a number: a small table in a float keeps its own size.
+        limit = CRUSHED_TABLE_COLUMNS if in_float(tex, start) else NARROW_TABLE_COLUMNS
+        narrow = 'p{' in spec and spec_columns(spec) >= limit
+        out.append(tex[pos:start])
+        out.append(r'\par\noindent'+(caption+r'\par\noindent' if caption else ''))
+        line = ''.join(out).count('\n')+1
+        out.append(r'\begin{adjustbox}{max width=\linewidth'+height+'}'+'\n')
+        if narrow:
+            out.append(r'\begin{minipage}{'+str(NARROW_TABLE_SCALE)+r'\linewidth}'+'\n')
+        out.append(r'\begin{tabular}{'+spec+'}'+'\n')
+        out.append('\n'.join(part.strip() for part in (head, body, foot) if part.strip())+'\n')
+        out.append(r'\end{tabular}'+'\n')
+        if narrow:
+            out.append(r'\end{minipage}'+'\n')
+        out.append(r'\end{adjustbox}')
+        ranges.append([line, ''.join(out).count('\n')+1])
+        fitted += 1
+        pos = end+len(r'\end{longtable}')
+    out.append(tex[pos:])
+    return ''.join(out), fitted, ranges
+
+
+def mark_regions(blocks):
+    """Swap the layout markers for TeX sentinels that survive the LaTeX writer.
+
+    Regions are never converted on their own: pandoc decides which packages the
+    preamble needs from the whole document, so a table inside a region must stay
+    visible to it. The sentinels become real environments after conversion.
+    """
+    out, columns, floated = [], 1, None
+    for block in blocks:
+        mark = column_mark(block['c'][1]) if block.get('t') == 'RawBlock' and block['c'][0] == 'html' else None
+        if not mark:
+            out.append(block)
+            continue
+        kind, value = mark
+        if kind == 'columns':
+            columns = value
+            command = r'\typeout{TRANSLATOR-COLUMNS-BEGIN:'+str(value)+'}'
+        elif kind == 'float':
+            floated = value
+            command = r'\typeout{TRANSLATOR-FLOAT-BEGIN:'+value+'}'
+        elif value:
+            command = r'\typeout{TRANSLATOR-FLOAT-END:'+str(floated)+'}'
+        else:
+            command = r'\typeout{TRANSLATOR-COLUMNS-END}'
+        out.append({'t': 'RawBlock', 'c': ['latex', command]})
+    return out, columns
+
+
+def float_environment(name, columns):
+    """Environment for a float marker.
+
+    A table that spans the page uses the starred form (and can only sit at a
+    page top); a table inside one column uses the plain form, where `h` keeps it
+    next to its caption. Figures only float when they span.
+    """
+    if name == 'table-span':
+        starred = columns >= 2
+        base = 'table'
+    elif name == 'table':
+        starred, base = False, 'table'
+    else:
+        starred, base = columns >= 2, 'figure'
+    env = base + ('*' if starred else '')
+    return env, ('[!tp]' if starred else '[!htbp]')
+
+
+def region_patterns(columns):
+    """Sentinel replacements for the detected column count."""
+    patterns = []
+    if columns >= 3:
+        patterns.extend([
+            (re.compile(r'\\typeout\{TRANSLATOR-COLUMNS-BEGIN:(\d+)\}'),
+             lambda match: '\n'+r'\begin{multicols*}{'+match[1]+'}'+'\n'),
+            (re.compile(r'\\typeout\{TRANSLATOR-COLUMNS-END\}'),
+             lambda match: '\n'+r'\end{multicols*}'+'\n'),
+        ])
+    else:
+        # Two columns already flow; single column has no column flow at all.
+        patterns.append((re.compile(r'\s*\\typeout\{TRANSLATOR-COLUMNS-(?:BEGIN:\d+|END)\}'),
+                         lambda match: ''))
+    patterns.extend([
+        (re.compile(r'\\typeout\{TRANSLATOR-FLOAT-BEGIN:(table-span|table|figure)\}'),
+         lambda match: '\n'+r'\begin{'+float_environment(match[1], columns)[0]+'}'
+                       +float_environment(match[1], columns)[1]+r'\centering'+'\n'),
+        (re.compile(r'\\typeout\{TRANSLATOR-FLOAT-END:(table-span|table|figure)\}'),
+         lambda match: '\n'+r'\end{'+float_environment(match[1], columns)[0]+'}'+'\n'),
+    ])
+    return patterns
+
+
+REFERENCE_HEADING = re.compile(
+    r'\\(?:sub)?section\*?\{[^{}]*(?:参考文献|引用文献|References|Bibliography)[^{}]*\}')
+
+
+def shrink_references(tex):
+    """Set the bibliography in a smaller size, as the source paper does.
+
+    Only a heading in the last half of the *body* counts as the reference list,
+    so material after it (an appendix) is not shrunk by accident. Pending wide
+    floats are flushed before it, otherwise a full float queue spills tables out
+    behind the bibliography.
+    """
+    start = tex.find(r'\begin{document}')
+    end = tex.find(r'\end{document}')
+    if start < 0 or end < 0:
+        return tex
+    matches = [match for match in REFERENCE_HEADING.finditer(tex, start, end)]
+    if not matches:
+        return tex
+    heading = matches[-1]
+    if heading.start() < start + (end-start)*0.45:
+        return tex
+    barrier = r'\FloatBarrier' if r'\usepackage{placeins}' in tex else ''
+    return tex[:heading.start()] + barrier + tex[heading.start():heading.end()] + r'\small' + tex[heading.end():]
+
+
+def apply_regions(tex, columns=1):
+    """Turn the sentinels into the real layout.
+
+    Two columns use the class option: the body then flows continuously, so a
+    wide table floats to the top of a page and the text keeps filling the page
+    it left. Three or more columns use multicols regions, because the class
+    option only supports two. A single-column document only floats tables, so a
+    caption is never stranded on the previous page.
+    """
+    if columns == 2:
+        anchor = tex.index(r'\begin{document}')+len(r'\begin{document}')
+        first = tex.find(r'\typeout{TRANSLATOR-COLUMNS-BEGIN')
+        if first > anchor and tex[anchor:first].strip():
+            # The title block belongs to the full width above both columns.
+            tex = (tex[:anchor]+'\n'+r'\twocolumn[{' + tex[anchor:first] + '}]'+'\n'+tex[first:])
+    for pattern, replace in region_patterns(columns):
+        tex = pattern.sub(replace, tex)
+    return tex
+
+
+COLUMN_MARK = re.compile(r'^<!--\s*translator-columns:\s*(\d+)\s*-->$', re.I)
+COLUMN_END = re.compile(r'^<!--\s*translator-columns-end\s*-->$', re.I)
+FLOAT_MARK = re.compile(r'^<!--\s*translator-float:\s*(table-span|table|figure)\s*-->$', re.I)
+FLOAT_END = re.compile(r'^<!--\s*translator-float-end\s*-->$', re.I)
+
+
+def column_mark(raw):
+    """Recognise the invisible layout markers written by assemble()."""
+    text = raw.strip()
+    opened = COLUMN_MARK.match(text)
+    if opened:
+        return ('columns', int(opened[1]))
+    floated = FLOAT_MARK.match(text)
+    if floated:
+        return ('float', floated[1].lower())
+    if FLOAT_END.match(text):
+        return ('end', 'float')
+    return ('end', None) if COLUMN_END.match(text) else None
+
+
 def validate_layout(layout):
-    limits = {'figureMaxWidth':(.3,1), 'figureMaxHeight':(.15,.65), 'fontSize':(9,14)}
+    limits = {'figureMaxWidth':(.3,1), 'figureMaxHeight':(.15,.65), 'fontSize':(9,14), 'columns':(0,3)}
     if not isinstance(layout,dict) or set(layout)-set(limits):
         raise ValueError('无效排版参数。')
     for key,value in layout.items():
         low,high = limits[key]
-        if type(value) not in (int,float) or not low <= value <= high or (key=='fontSize' and int(value)!=value):
+        if type(value) not in (int,float) or not low <= value <= high or (key in {'fontSize','columns'} and int(value)!=value):
             raise ValueError('排版参数超出允许范围：'+key)
     return layout
 
@@ -494,8 +962,11 @@ def build_project(text, source_dir, project):
                 counts['unresolved_note_fragments'].append(body.strip())
             return {'t': 'RawBlock', 'c': ['latex', r'\begin{quote}\footnotesize\noindent\rule{0.3\linewidth}{0.3pt}\par ' + body + r'\end{quote}']}
         if kind in ('RawInline', 'RawBlock'):
-            if content[0]=='html' and re.fullmatch(r'<br\s*/?>',content[1],re.I):
-                return {'t':'LineBreak'}
+            if content[0]=='html':
+                if re.fullmatch(r'<br\s*/?>',content[1],re.I):
+                    return {'t':'LineBreak'}
+                if column_mark(content[1]):
+                    return node
             raise ValueError('存在未转换的 HTML 内容，停止以免遗漏。')
         return {k: visit(v) for k, v in node.items()}
 
@@ -544,6 +1015,10 @@ def build_project(text, source_dir, project):
     ast['blocks'] = [block for block in ast['blocks'] if block not in moved]
     ast['blocks'] = [item for block in ast['blocks'] for item in [block, *after_heading.get(id(block), [])]]
     counts['anchored_notes'] = len(moved)
+    # Layout markers survive the passes above; they become multicols regions and
+    # floats only after the single LaTeX conversion, so footnote binding still
+    # sees one flat block stream and pandoc still sees every table.
+    ast['blocks'], counts['columns'] = mark_regions(ast['blocks'])
     (project/'document.json').write_text(json.dumps(ast, ensure_ascii=False), encoding='utf-8')
     (project/'math-regions.json').write_text(json.dumps(math_regions, ensure_ascii=False, indent=2), encoding='utf-8')
     size = layout.get('fontSize',11)
@@ -554,9 +1029,13 @@ def build_project(text, source_dir, project):
     tex = run([pandoc, '-f', 'json', '-t', 'latex', '-s', '--pdf-engine=xelatex', '--no-highlight',
                '-V', f"fontsize={layout.get('fontSize',11)}pt",
                '-V', 'geometry:margin=24mm', '-V', 'papersize=a4',
-               '-V', 'colorlinks=true', '-V', 'linkcolor=black',
-               '--include-in-header=layout.tex'], json.dumps(ast), cwd=project)
+               '-V', 'colorlinks=true', '-V', 'linkcolor=black']
+              + (['-V', 'classoption=twocolumn'] if counts['columns'] == 2 else [])
+              + ['--include-in-header=layout.tex'], json.dumps(ast), cwd=project)
     tex = break_long_urls(tex)
+    tex = apply_regions(tex, counts['columns'])
+    tex = shrink_references(tex)
+    tex, counts['fitted_tables'], counts['table_lines'] = fit_tables(tex)
     (project/'main.tex').write_text(tex, encoding='utf-8')
     (project/'README.txt').write_text(
         '使用 XeLaTeX 编译 main.tex（两遍），或 tectonic --untrusted main.tex。\n'
@@ -573,6 +1052,67 @@ def is_math_symbol(char):
             or 0x1d400 <= point <= 0x1d7ff)
 
 
+MISSING_GLYPH = re.compile(r'Missing character: There is no .*? \(U\+([0-9A-Fa-f]{4,6})\)')
+CJK_RANGES = ((0x3000, 0x30FF), (0x3400, 0x4DBF), (0x4E00, 0x9FFF), (0xF900, 0xFAFF),
+              (0x20000, 0x2FA1F), (0xFF00, 0xFFEF))
+
+
+OVERFULL = re.compile(r'Overfull \\[hv]box \(([0-9.]+)pt([^\n]*)')
+OVERFULL_LINES = re.compile(r'at lines (\d+)--(\d+)')
+
+
+def split_overfull(engine_log, table_lines=()):
+    """Separate real overflow from boxes that adjustbox already scales down."""
+    outside, inside = [], []
+    for match in OVERFULL.finditer(engine_log):
+        size = float(match[1])
+        where = OVERFULL_LINES.search(match[2])
+        first = int(where[1]) if where else 0
+        if first and any(start-1 <= first <= end+1 for start, end in table_lines):
+            inside.append(size)
+        else:
+            outside.append(size)
+    return outside, inside
+
+
+def missing_glyphs(log):
+    """Characters the main font cannot render, in first-seen order."""
+    seen = []
+    for code in MISSING_GLYPH.findall(log):
+        char = chr(int(code, 16))
+        if char not in seen:
+            seen.append(char)
+    return seen
+
+
+def heal_glyphs(project, chars):
+    """Route unrepresentable characters through the fallback fonts and rebuild.
+
+    One missing glyph used to abort the whole translation. Re-adding the
+    character with a font that has it costs a compile, never a model call.
+    """
+    tex_path = project/'main.tex'
+    tex = tex_path.read_text('utf-8')
+    marker = r'\begin{document}'
+    if marker not in tex:
+        return False
+    lines = []
+    for char in chars:
+        command = 'cjkchar' if any(low <= ord(char) <= high for low, high in CJK_RANGES) else 'symbolchar'
+        lines.append('\\newunicodechar{'+char+'}{\\'+command+'{'+char+'}}')
+    tex_path.write_text(tex.replace(marker, '\n'.join(lines)+'\n'+marker, 1), encoding='utf-8')
+    return True
+
+
+def compile_pdf(project, tectonic):
+    """One TeX run; returns (returncode, console log)."""
+    result = subprocess.run([tectonic, '--untrusted', '--keep-logs', 'main.tex'],
+                            cwd=project, capture_output=True, encoding='utf-8', errors='replace', timeout=600)
+    log = result.stdout + '\n' + result.stderr
+    (project/'compile.log').write_text(log, encoding='utf-8')
+    return result.returncode, log
+
+
 def render_latex(text, cache, output, *, strict_layout=False):
     output = Path(output)
     project = output.with_suffix('')
@@ -582,12 +1122,22 @@ def render_latex(text, cache, output, *, strict_layout=False):
     # A failed/retried run must never publish a PDF left by an older compile.
     for name in ('main.pdf', 'main.log'):
         (project/name).unlink(missing_ok=True)
+    healed = []
     with progress.spinner('编译 PDF（tectonic）'):
-        result = subprocess.run([tectonic, '--untrusted', '--keep-logs', 'main.tex'],
-                                cwd=project, capture_output=True, encoding='utf-8', errors='replace', timeout=600)
-    log = result.stdout + '\n' + result.stderr
-    (project/'compile.log').write_text(log, encoding='utf-8')
-    if result.returncode or not (project/'main.pdf').exists():
+        code, log = compile_pdf(project, tectonic)
+        for _ in range(2):
+            engine_log = (project/'main.log').read_text('utf-8', errors='replace') if (project/'main.log').exists() else ''
+            pending = [char for char in missing_glyphs(engine_log) if char not in healed]
+            if not pending or not heal_glyphs(project, pending):
+                break
+            heated = pending
+            healed.extend(pending)
+            # Healing adds one line per character above \begin{document}, so the
+            # table ranges recorded by fit_tables move down by that many lines.
+            counts['table_lines'] = [[low+len(heated), high+len(heated)]
+                                     for low, high in counts.get('table_lines', [])]
+            code, log = compile_pdf(project, tectonic)
+    if code or not (project/'main.pdf').exists():
         engine_log = (project/'main.log').read_text('utf-8', errors='replace') if (project/'main.log').exists() else ''
         events = re.findall(r'^TRANSLATOR-MATH-(BEGIN|END):(\d+)\s*$', engine_log, re.M)
         context = None
@@ -602,23 +1152,30 @@ def render_latex(text, cache, output, *, strict_layout=False):
     counts['scaled_displays'] = engine_log.count('LATEX-TRANSLATOR: scaled wide display')
     counts['scaled_inline_math'] = engine_log.count('LATEX-TRANSLATOR: scaled wide inline')
     counts['warnings'] = [line for line in log.splitlines() if 'warning:' in line.lower()]
-    counts['overfull_boxes_pt'] = [float(n) for n in re.findall(r'Overfull \\[hv]box \(([0-9.]+)pt', engine_log)]
+    table_lines = counts.pop('table_lines', [])
+    counts['overfull_boxes_pt'], counts['scaled_table_boxes'] = split_overfull(engine_log, table_lines)
     counts['missing_characters'] = [line for line in engine_log.splitlines() if 'Missing character:' in line]
-    (project/'render-report.json').write_text(json.dumps(counts, ensure_ascii=False, indent=2), encoding='utf-8')
-    if counts['unresolved_note_fragments']:
-        print(f"脚注结构需复核：保留了 {len(counts['unresolved_note_fragments'])} 个无法确认归属的短片段，详见 {project/'render-report.json'}", flush=True)
+    counts['healed_glyphs'] = healed
     severe = [n for n in counts['overfull_boxes_pt'] if n > SEVERE_OVERFULL_PT]
     context = layout_error_context(project, engine_log) if (counts['missing_characters'] or severe) else None
     counts['font_warnings'] = counts['missing_characters']
+    if counts['missing_characters']:
+        # A glyph the fallback fonts do not carry either is a cosmetic defect on
+        # one character; it must not discard an otherwise complete translation.
+        counts['unresolved_glyphs'] = missing_glyphs(engine_log)
+    # 越界无法定位到具体内容块时（例如文献里的长 DOI）保留 PDF 并报告，
+    # 只在 strict_layout 下才整次失败。
     counts['overfull_accepted'] = severe
     counts['status'] = 'needs_review' if counts['font_warnings'] or severe else 'complete'
     (project/'render-report.json').write_text(json.dumps(counts, ensure_ascii=False, indent=2), encoding='utf-8')
     if strict_layout and (counts['missing_characters'] or severe):
         raise LatexLayoutError('LaTeX 严格排版检查未通过（缺字或内容越界）。请检查：' + str(project/'render-report.json'), context)
-    if counts['font_warnings']:
-        print(f"字体警告：{len(counts['font_warnings'])} 处字形缺失，已保留 PDF 并标记需复核；详见 {project/'render-report.json'}", flush=True)
+    if counts['unresolved_note_fragments']:
+        print(f"脚注结构需复核：保留了 {len(counts['unresolved_note_fragments'])} 个无法确认归属的短片段，详见 {project/'render-report.json'}", flush=True)
+    if counts.get('unresolved_glyphs'):
+        print(f"字形警告：{' '.join(counts['unresolved_glyphs'])} 在可用字体中缺失，已保留 PDF；详见 render-report.json", flush=True)
     if severe:
-        print(f"排版警告：{len(severe)} 处内容越界（{', '.join(f'{n:g}pt' for n in severe)}），已保留 PDF 并标记需复核；详见 render-report.json", flush=True)
+        print(f"排版警告：{len(severe)} 处越界无法定位到具体内容块（{', '.join(f'{n:g}pt' for n in severe)}），已保留 PDF；详见 render-report.json", flush=True)
     try:
         shutil.copyfile(project/'main.pdf', output)
     except PermissionError as exc:
