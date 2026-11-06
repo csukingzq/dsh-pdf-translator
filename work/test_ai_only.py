@@ -10,6 +10,29 @@ from cli import exclusive
 
 
 class AiOnlyTests(unittest.TestCase):
+    def test_extract_then_translate_and_offline_rerender(self):
+        source=Path(__file__).resolve().parent.parent/'tests/fixtures/vision-sample.pdf'
+        cfg={'base_url':'https://example.invalid/v1','api_key':'unused','model':'vision'}
+        data={'complete':True,'recognition_only':True,'semantic_document':True,'blocks':[
+            dict(kind='paragraph',bbox=[.1,.1,.9,.3],markdown='Source $x$¹',source_text='Source x¹',role_candidate='body'),
+            dict(kind='footnote',bbox=[.1,.8,.9,.9],markdown='[^1]: Note',source_text='1Note',role_candidate='footnote')]}
+        def render(text,cache,output):
+            output.write_bytes(source.read_bytes());project=output.with_suffix('');project.mkdir(parents=True,exist_ok=True)
+            (project/'main.tex').write_text(text,'utf-8');(project/'render-report.json').write_text('{}','utf-8')
+        def translate(llm,payload,error):
+            return {'units':[dict(id=u['id'],text='译文 '+u['text']) for u in payload['units']]}
+        with tempfile.TemporaryDirectory() as folder, patch.object(pipeline,'request_page',return_value=data) as extract, patch.object(pipeline,'request_translation',side_effect=translate) as translation, patch.object(pipeline,'render_latex',render):
+            first=pipeline.run_document(source,'1',cfg,workers=1,data_dir=folder)
+            self.assertTrue(extract.call_args.kwargs['recognition_only'])
+            self.assertEqual(translation.call_count,1)
+            extract.reset_mock();translation.reset_mock()
+            second=pipeline.run_document(source,'1',cfg,workers=1,data_dir=folder,render_only=True)
+            extract.assert_not_called();translation.assert_not_called()
+            a=json.loads(Path(first['document']).read_text('utf-8'))
+            b=json.loads(Path(second['document']).read_text('utf-8'))
+            self.assertEqual(a['pages'],b['pages'])
+            self.assertEqual(b['structure']['notes'][0]['anchors'],['p1-b1'])
+
     def setUp(self):
         reader = patch.object(pipeline, 'request_structure', side_effect=lambda llm, images: {
             'pages':[dict(page=n,is_contents=False,printed_page='',regions=[],entries=[]) for n,_ in images]})
@@ -38,13 +61,19 @@ class AiOnlyTests(unittest.TestCase):
         self.assertEqual((guide.width,guide.height),(300,400))
 
 
-    def test_ai_figure_box_is_used_exactly_and_labels_are_preserved(self):
+    def test_unverified_figure_box_is_preserved_with_diagnostic_and_labels(self):
         block = {'id':'p1-b1', 'page':1, 'kind':'figure', 'bbox':[.13,.22,.87,.71],
                  'markdown':'Time：时间；Distance：距离。'}
         with tempfile.TemporaryDirectory() as folder, patch.object(pipeline, 'crop') as crop:
-            text = pipeline.block_markdown(block, Path('source.pdf'), Path(folder))
+            source=Path(folder)/'source.pdf'
+            with pymupdf.open() as pdf:
+                pdf.new_page()
+                pdf.save(source)
+            text = pipeline.block_markdown(block, source, Path(folder))
             self.assertEqual(crop.call_args.args[2], block['bbox'])
             self.assertIn('Time：时间', text)
+            audit=json.loads((Path(folder)/'crop-report.json').read_text('utf-8'))
+            self.assertEqual(audit['figures'][block['id']]['diagnostics'],['figure_native_geometry_unavailable'])
 
     def test_missing_completeness_is_rejected(self):
         cfg = SimpleNamespace(base_url='https://example.invalid/v1', api_key='test-key', model='vision')
@@ -87,7 +116,7 @@ class AiOnlyTests(unittest.TestCase):
             request.assert_not_called()
             self.structure_reader.assert_not_called()
             report = json.loads(Path(result['report']).read_text('utf-8'))
-            self.assertIsNone(report['ocr'])
+            self.assertEqual(report['ocr'], {'engines':[], 'available':False})
             self.assertEqual(report['formula_review']['mode'], 'ai')
 
     def test_font_warning_marks_translation_for_review(self):

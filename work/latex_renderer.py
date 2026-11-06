@@ -150,6 +150,9 @@ HEADER = r"""
 \setlength{\emergencystretch}{3em}
 \pagestyle{fancy}
 \fancyhf{}
+\fancyhead[C]{\small\nouppercase{\leftmark}}
+\renewcommand{\sectionmark}[1]{\markboth{#1}{}}
+\renewcommand{\subsectionmark}[1]{\markright{#1}}
 \fancyfoot[C]{\small\thepage}
 \renewcommand{\headrulewidth}{0pt}
 \setlength{\headheight}{14pt}
@@ -879,6 +882,21 @@ def build_project(text, source_dir, project):
                              + r'\adjustbox{max width=\linewidth,max height=' + str(layout.get('figureMaxHeight',.45)) + r'\textheight}{\includegraphics{'
                              + figure['image'] + r'}}\par' + '\n' + figure['caption'] + '\n' + r'\end{minipage}')
             return {'t':'RawBlock','c':['latex',r'\par\noindent' + r'\hfill'.join(cells) + r'\par']}
+        if kind == 'Div' and 'figure-group' in content[0][1]:
+            inner = run([pandoc,'-f','json','-t','latex'],
+                        json.dumps({**ast,'blocks':visit(content[1])})).strip()
+            return {'t':'RawBlock','c':['latex',r'\par\noindent\begin{minipage}{\linewidth}'+'\n'+inner+'\n'+r'\end{minipage}\par']}
+        if kind == 'Str' and re.search(r'DSHNOTE(?:LABEL|REF)[0-9a-f]+END', content):
+            parts = []
+            for fragment in re.split(r'(DSHNOTE(?:LABEL|REF)[0-9a-f]+END)', content):
+                match = re.fullmatch(r'DSHNOTE(LABEL|REF)([0-9a-f]+)END', fragment)
+                if match:
+                    label = 'dsh-note-' + match[2]
+                    latex = (r'\label{'+label+'}') if match[1]=='LABEL' else (r'\textsuperscript{\ref{'+label+'}}')
+                    parts.append({'t':'RawInline','c':['latex',latex]})
+                elif fragment:
+                    parts.append({'t':'Str','c':fragment})
+            return {'t':'Span','c':[['',[],[]],parts]}
         if kind == 'Str' and any(is_math_symbol(c) for c in content):
             # Let unicode-math select mathematical glyphs instead of text fonts.
             parts = []
@@ -971,6 +989,19 @@ def build_project(text, source_dir, project):
         return {k: visit(v) for k, v in node.items()}
 
     ast['blocks'] = visit(ast['blocks'])
+    # Pandoc uses starred headings with secnumdepth=-1. Explicit marks are
+    # needed: sectionmark alone does not update running headers for those.
+    marked = []
+    for block in ast['blocks']:
+        marked.append(block)
+        if block.get('t') == 'Header' and block['c'][0] <= 2:
+            plain = run([pandoc,'-f','json','-t','plain'], json.dumps({**ast,'blocks':[
+                {'t':'Para','c':block['c'][2]}]})).strip().replace('\n',' ')
+            escaped = ''.join({'\\':r'\textbackslash{}','{':r'\{','}':r'\}',
+                '%':r'\%','#':r'\#','&':r'\&','_':r'\_','$':r'\$',
+                '^':r'\textasciicircum{}','~':r'\textasciitilde{}'}.get(c,c) for c in plain)
+            marked.append({'t':'RawBlock','c':['latex',r'\markboth{'+escaped+'}{'+escaped+'}']})
+    ast['blocks'] = marked
     # Bind a uniquely identified source marker to its note. LaTeX then keeps
     # the note on the marker's page even when translated paragraphs reflow.
     notes = {}

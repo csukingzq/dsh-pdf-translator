@@ -1,6 +1,6 @@
 {
   "name": "dsh-pdf-translator",
-  "version": "0.5.1",
+  "version": "0.6.0-rc.1",
   "description": "AI vision PDF translation and LaTeX reconstruction for DeepSeek Harness",
   "type": "module",
   "main": "src/index.js",
@@ -26,7 +26,8 @@
     "VERIFICATION.md",
     "CHANGELOG.md",
     "LICENSE",
-    "lib/client.js"
+    "lib/client.js",
+    "requirements-structure.txt"
   ],
   "dsh": {
     "bundle": {

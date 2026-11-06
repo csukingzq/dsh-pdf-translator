@@ -1,0 +1,5 @@
+# Isolated optional extraction worker; not installed in the translation runtime.
+babeldoc==0.6.4
+# BabelDOC 0.6.4 imports BitStream, removed in bitstring 5.
+bitstring==4.3.1
+paddleocr==3.3.1

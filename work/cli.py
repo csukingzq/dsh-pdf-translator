@@ -71,7 +71,8 @@ def execute(request, on_progress=None):
         data_dir = Path(request.get('dataDir') or ROOT).resolve()
         return {'python':sys.executable, 'pymupdf':pymupdf.__version__, 'renderer':renderer,
                 'model_configured':bool(cfg.get('api_key') and cfg.get('model') and cfg.get('base_url')),
-                'recognition':'ai-only', 'local_ocr':False,
+                'recognition':'structured-vision', 'local_ocr':bool(cfg.get('structure_python')),
+                'structure_worker_configured':bool(cfg.get('structure_python')),
                 'plugin_root':str(ROOT), 'data_dir':str(data_dir), 'config_path':str(config_path.resolve()),
                 'runtime_dir':os.environ.get('DSH_PDF_RUNTIME_DIR') or str(ROOT/'runtime')}
     source = Path(request['pdf']).expanduser().resolve()

@@ -106,7 +106,7 @@ def execute(request):
     progress = read(progress_path) if progress_path.exists() else {}
     if progress.get('version') != version:
         progress = dict(version=version, inspected=[], previewed=[])
-    warnings = list(report.get('structure_warnings', []))
+    warnings = list(report.get('structure_warnings', [])) + list(report.get('crop_warnings', []))
     all_warnings = warnings + [dict(reason=category, detail=w) for category in ('layout_warnings','font_warnings','issues') for w in report.get(category,[])]
     if action == 'diagnostics':
         rows = [w for w in all_warnings if (not request.get('page') or w.get('page')==request['page'] or request['page'] in w.get('pages', []))
@@ -127,12 +127,18 @@ def execute(request):
         progress['inspected'] = sorted(set(progress['inspected']+[number]))
         save(progress_path, progress)
         unread = [n for n in unread if n != number]
-        fields = {'id','page','kind','bbox','markdown','status','source_text','role_candidate','role','heading_level','parent_id','excluded','structure_override','structure_warnings'}
+        fields = {'id','page','kind','bbox','markdown','status','source_text','role_candidate','role','heading_level','parent_id','excluded','structure_override','structure_warnings','note_override','note_id','note_anchors','note_marker','note_unlinked'}
         selected = [dict(p, blocks=[{k:v for k,v in b.items() if k in fields} for b in p['blocks']]) for p in selected]
+        for p in selected:
+            for b in p['blocks']:
+                geometry=report.get('figure_crops',{}).get(b['id'])
+                if geometry:
+                    b.update(crop_bbox=geometry['bbox'],crop_decision=geometry['decision'],crop_warnings=geometry['diagnostics'])
         compact_report = {k:report[k] for k in ('status','notes_without_marker') if k in report}
-        compact_report['warningCounts'] = {k:len(report.get(k,[])) for k in ('structure_warnings','layout_warnings','font_warnings','issues')}
-        compact_report['structure_warnings'] = [w for w in warnings if w.get('page')==number or number in w.get('pages', [])]
-        compact_report['structure_warning_count'] = len(warnings)
+        compact_report['warningCounts'] = {k:len(report.get(k,[])) for k in ('structure_warnings','crop_warnings','layout_warnings','font_warnings','issues')}
+        for category in ('structure_warnings','crop_warnings'):
+            compact_report[category] = [w for w in report.get(category,[]) if w.get('page')==number or number in w.get('pages', [])]
+        compact_report['structure_warning_count'] = len(report.get('structure_warnings',[]))
         return {'version':version, 'report':compact_report, 'pages':selected, 'layout':doc.get('layout',{}), 'totalPages':len(pages),
                 'nextPage':unread[0] if unread else None, 'remainingPages':len(unread), 'complete':not unread,
                 'inspectedPages':progress['inspected'],
@@ -182,7 +188,7 @@ def execute(request):
         edited = set()
         for edit in request['blockEdits']:
             identifier = edit.get('id')
-            if identifier not in known or identifier in edited or set(edit)-{'id','markdown','structure_override'}:
+            if identifier not in known or identifier in edited or set(edit)-{'id','markdown','structure_override','note_override'}:
                 raise ValueError('blockEdits 块 ID 重复、未知或字段无效。')
             edited.add(identifier)
             original_page = known[identifier]
@@ -217,11 +223,23 @@ def execute(request):
             for field in ('kind','markdown','bbox'):
                 if block[field] != previous.get(field):
                     original[field] = copy.deepcopy(block[field])
+                    if field == 'markdown':
+                        revised_block.pop('translation_warning', None)
             if 'structure_override' in block:
                 if block['structure_override'] is None:
                     revised_block.pop('structure_override', None)
                 else:
                     revised_block['structure_override'] = validate_override(block['structure_override'])
+            if 'note_override' in block:
+                value = block['note_override']
+                if value is None:
+                    revised_block.pop('note_override', None)
+                elif (not isinstance(value, dict) or set(value) != {'anchors'}
+                      or not isinstance(value['anchors'], list)
+                      or any(not isinstance(a, str) for a in value['anchors'])):
+                    raise ValueError('note_override 必须是 {anchors: [正文块 ID]} 或 null')
+                else:
+                    revised_block['note_override'] = copy.deepcopy(value)
             clean['blocks'].append(revised_block)
         by_page[number] = clean
     revised = [by_page[p['page']] for p in pages]
@@ -245,8 +263,13 @@ def execute(request):
                 prior = accepted.get(b['id'])
                 if prior:
                     b.update(copy.deepcopy(prior.get('structure_original', {})))
+                    for field in ('translation_warning','translation_version','translation_source_ids','note_marker'):
+                        if field in prior:
+                            b[field] = copy.deepcopy(prior[field])
                     if 'structure_override' in prior:
                         b['structure_override'] = copy.deepcopy(prior['structure_override'])
+                    if 'note_override' in prior:
+                        b['note_override'] = copy.deepcopy(prior['note_override'])
             raw_ids = {b['id'] for b in raw['blocks']}
             raw['blocks'].extend(copy.deepcopy(b) for b in current['blocks'] if b['id'] not in raw_ids)
             raw_pages.append(raw)
@@ -268,7 +291,10 @@ def execute(request):
                   issues=[{'block':b,'reason':'保留原图，需要人工确认','status':'source_image'} for b in fallback])
     report['structure_warnings'] = structure['diagnostics']
     report['structure_version'] = STRUCTURE_VERSION
-    report['status'] = 'needs_review' if fallback or report['layout_warnings'] or report['font_warnings'] or report['notes_without_marker'] or structure['diagnostics'] else 'complete'
+    report['figure_crops'] = read(stage/'crop-report.json')['figures']
+    report['crop_warnings'] = [dict(page=g['page'],block=g['block'],reason=reason,bbox=g['original_bbox'])
+                             for g in report['figure_crops'].values() for reason in g['diagnostics']]
+    report['status'] = 'needs_review' if fallback or report['layout_warnings'] or report['font_warnings'] or report['notes_without_marker'] or structure['diagnostics'] or report['crop_warnings'] else 'complete'
     report['ai_review'] = {'status':'reviewing','rounds':request['round'],'backup':str(transaction/'journal.json')}
     doc['pages'] = revised
     doc['layout'] = layout
@@ -276,12 +302,15 @@ def execute(request):
     doc['structure'] = structure
     report['layout'] = layout
     # Rebuild the shipped source archive from the same accepted revision.
+    save(project/'translation-project.json', {'schema':'document-ir-v1','pages':revised,
+         'tree':structure['tree'],'notes':structure.get('notes', []),'diagnostics':structure['diagnostics']})
     write_latex_archive(project, stage/archive.name)
     save(stage/'document.json', doc)
     save(stage/report_path.name, report)
     pairs = [(stage/output.name, output), (stage/archive.name, archive),
              (stage/'document.json', document), (stage/report_path.name, report_path),
-             (stage/'translated.md', markdown), (stage/'layout.json', cache/'layout.json')]
+             (stage/'translated.md', markdown), (stage/'layout.json', cache/'layout.json'),
+             (stage/'crop-report.json', cache/'crop-report.json')]
     # All reusable representations must describe the same accepted revision.
     for target in [canonical,cache/'document.json',cache/'final-pages.json']:
         payload = read(target) if target.exists() else copy.deepcopy(doc)

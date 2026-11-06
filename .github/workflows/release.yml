@@ -67,6 +67,8 @@ jobs:
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
+          prerelease: ${{ contains(env.VERSION, '-') }}
+          body_path: .github/RELEASE_NOTES.md
           files: |
             dist/dsh-pdf-translator.tgz
             dist/dsh-pdf-translator-${{ env.VERSION }}.tgz
@@ -78,7 +80,8 @@ jobs:
         shell: powershell
         run: |
           $tarball = (Resolve-Path "dist/dsh-pdf-translator-$env:VERSION.tgz").Path
-          npm publish "$tarball" --provenance --access public --registry https://registry.npmjs.org/
+          $distTag = if ($env:VERSION.Contains('-')) { 'next' } else { 'latest' }
+          npm publish "$tarball" --tag $distTag --provenance --access public --registry https://registry.npmjs.org/
 
       - name: Note missing npm token
         if: ${{ !startsWith(env.NODE_AUTH_TOKEN, 'npm_') }}

@@ -12,6 +12,46 @@ import review_pipeline as review
 
 
 class ReviewTests(unittest.TestCase):
+    def test_translation_warning_survives_recompute_until_text_is_edited(self):
+        review.save(self.cache/'pages/0001/result.json',self.page)
+        for path in [self.task/'document.json',self.cache/'rendering.json',self.cache/'document.json',self.cache/'final-pages.json']:
+            doc=review.read(path);doc['pages'][0]['blocks'][0]['translation_warning']='protected object mismatch'
+            review.save(path,doc)
+        with patch.object(review,'render_latex',self.render):
+            self.invoke('apply',recomputeStructure=True)
+            report=review.read(self.task/'report.json')
+            self.assertIn('translation_failed',[d['reason'] for d in report['structure_warnings']])
+            self.request['round']=2
+            self.invoke('apply',blockEdits=[dict(id='p1-b1',markdown='已核实修订')])
+        self.assertNotIn('translation_warning',review.read(self.task/'document.json')['pages'][0]['blocks'][0])
+
+    def test_note_override_survives_offline_recompute(self):
+        page=copy.deepcopy(self.page)
+        page['semantic_document']=True
+        page['blocks'].append(dict(id='p1-b2',page=1,kind='footnote',bbox=[.1,.8,.9,.9],
+            markdown='脚注内容',source_text='1Note',role_candidate='footnote',status='translated',
+            note_override={'anchors':['p1-b1']}))
+        review.save(self.cache/'pages/0001/result.json',self.page)
+        with patch.object(review,'render_latex',self.render), patch('socket.create_connection',side_effect=AssertionError('offline')):
+            self.invoke('apply',pages=[page])
+            self.request['round']=2
+            self.invoke('apply',recomputeStructure=True)
+        result=review.read(self.task/'document.json')
+        note=result['pages'][0]['blocks'][1]
+        self.assertEqual(note['note_anchors'],['p1-b1'])
+        self.assertIn('[^note-p1-b2]',result['pages'][0]['blocks'][0]['markdown'])
+
+    def test_crop_diagnostics_visible_and_prevent_successful_verification(self):
+        report=review.read(self.task/'report.json')
+        report['crop_warnings']=[dict(page=1,block='p1-b1',reason='figure_native_geometry_unavailable')]
+        report['figure_crops']={'p1-b1':dict(bbox=[0,0,1,1],decision='unverified',diagnostics=['figure_native_geometry_unavailable'])}
+        review.save(self.task/'report.json',report)
+        inspected=self.invoke('inspect')
+        self.assertEqual(inspected['pages'][0]['blocks'][0]['crop_decision'],'unverified')
+        self.assertEqual(len(self.invoke('diagnostics',page=1)['diagnostics']),1)
+        result=self.invoke('finish',summary='claimed success')
+        self.assertEqual(result['result']['status'],'needs_review')
+        self.assertEqual(result['result']['review']['verification'],'仍有未解决问题')
     def test_offline_recompute_preserves_override_and_requires_version(self):
         with self.assertRaisesRegex(ValueError,'expectedVersion'):
             self.invoke('apply',expectedVersion=None,recomputeStructure=True)

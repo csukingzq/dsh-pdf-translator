@@ -104,6 +104,7 @@ class StructureTests(unittest.TestCase):
         self.assertEqual(blocks[2]['heading_level'],2)
         self.assertEqual(blocks[2]['parent_id'],'chapter')
         self.assertEqual(blocks[3]['role'],'body_label')
+
         self.assertFalse(blocks[3]['excluded'])
         self.assertEqual(result['diagnostics'],[])
         self.assertNotIn('excluded',raw[0]['blocks'][0])
@@ -120,6 +121,16 @@ class StructureTests(unittest.TestCase):
         self.assertEqual(blocks[1].get('merged_into'),blocks[0]['id'])
         self.assertEqual(blocks[2]['heading_level'],2)
         self.assertEqual(blocks[3]['role'],'body_label')
+
+        # A translated merged title must not append its untranslated source
+        # fragment again on renderOnly or review recomputation.
+        from semantic_document import translate_document
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder:
+            translated=translate_document(result['pages'],result['tree'],folder,{},
+                lambda payload,error: {'units':[dict(id=u['id'],text='译文') for u in payload['units']]})
+        again=self.resolve(translated['pages'],evidence)
+        self.assertNotIn('Hilbert Spaces',again['pages'][0]['blocks'][0]['markdown'])
 
     def test_body_labels_before_after_number_and_outline_exception(self):
         labels=['7.14. 命题','1.1. Definition','定理 3.2','Proposition 4.1','3.2 节']

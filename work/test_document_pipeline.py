@@ -329,7 +329,7 @@ class StructuredPipelineTests(unittest.TestCase):
         self.assertEqual(data['blocks'][1]['markdown'],'[^1]: Corresponding author.')
         self.assertNotIn('dangling_notes', data)
 
-    def test_note_without_marker_is_kept_as_body_text(self):
+    def test_note_without_marker_keeps_identity(self):
         data = {'complete':True,'blocks':[
             {'kind':'paragraph','bbox':[.1,.1,.9,.2],'markdown':'正文[^1]'},
             {'kind':'footnote','bbox':[.1,.9,.9,.95],'markdown':'[^1]: 有标记的注释'},
@@ -338,8 +338,8 @@ class StructuredPipelineTests(unittest.TestCase):
         blocks = normalize_notes(data)['blocks']
         self.assertEqual(len(blocks),3)
         self.assertEqual(blocks[1]['kind'],'footnote')
-        self.assertEqual(blocks[2]['kind'],'paragraph')
-        self.assertEqual(blocks[2]['markdown'],'参考文献')
+        self.assertEqual(blocks[2]['kind'],'footnote')
+        self.assertEqual(blocks[2]['markdown'],'[^2]: 参考文献')
         self.assertEqual(data['dangling_notes'],['2'])
         validate(data)
 
@@ -436,7 +436,7 @@ class StructuredPipelineTests(unittest.TestCase):
         self.assertIn('表格内容一律保留原文', PROMPT)
         self.assertNotIn('翻译正文、图注、表格', PROMPT)
 
-    def test_ai_first_pass_still_receives_no_extracted_text(self):
+    def test_extraction_receives_native_evidence(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = root/'source.pdf'
@@ -448,7 +448,7 @@ class StructuredPipelineTests(unittest.TestCase):
             from document_pipeline import process_page
             with patch('document_pipeline.request_page',return_value=response) as request:
                 process_page(source,0,root/'cache',None,'test',1)
-            self.assertEqual(request.call_args.args[2:4],('', ''))
+            self.assertEqual(request.call_args.args[2], 'WRONG extracted formula reference')
 
     def test_echoed_english_body_page_is_flagged(self):
         # A page the model echoed instead of translating used to pass silently;

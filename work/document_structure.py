@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pymupdf
 
-STRUCTURE_VERSION = 'document-structure-v2'
+STRUCTURE_VERSION = 'document-structure-v3'
 # Evidence format changes independently: resolver upgrades must not buy the
 # same vision observations again. The initial format shares the v1 identifier.
 SOURCE_EVIDENCE_VERSION = 'document-structure-v1'
@@ -212,6 +212,9 @@ def build_source_index(source, selected, cache=None, analysis_config=None, analy
                     if text and valid_box(box):
                         lines.append(dict(source_text=text, bbox=box,
                                           font_size=max(s['size'] for s in line['spans']),
+                                          superscripts=[dict(text=s['text'],bbox=[s['bbox'][0]/sheet.rect.width,
+                                              s['bbox'][1]/sheet.rect.height,s['bbox'][2]/sheet.rect.width,s['bbox'][3]/sheet.rect.height])
+                                              for s in line['spans'] if s['flags'] & 1],
                                           bold=any(s['flags'] & 16 for s in line['spans'])))
             index['pages'][str(n)] = dict(lines=lines, regions=[], printed_page='', is_contents=False)
         contents = [n['page'] for n in index['nodes'] if TOC_TITLE.match(n['title'].strip())]
@@ -449,6 +452,18 @@ def resolve_document_structure(raw_pages, source_index, overrides=None):
             block['source_text'] = _source_text(block, evidence)
             block.pop('source_bbox', None)
             anchor = locate_source(block, native_regions(evidence.get('lines', [])))
+            if not anchor:
+                # Independent scan observations can locate a short text inside
+                # an over-wide model box. Require exact text and containment;
+                # a mixed body/header block must never match on a substring.
+                box = block['bbox']
+                candidates = [r['bbox'] for r in evidence.get('regions', [])
+                    if valid_box(r.get('bbox')) and similarity(r.get('source_text',''),block['source_text']) >= .98
+                    and box[0]-.01 <= r['bbox'][0] < r['bbox'][2] <= box[2]+.01
+                    and box[1]-.01 <= r['bbox'][1] < r['bbox'][3] <= box[3]+.01
+                    and box[3]-box[1] <= .06]
+                if len(candidates) == 1:
+                    anchor = candidates[0]
             if anchor:
                 block['source_bbox'] = anchor
             block.update(role='body', excluded=False, decision_source='preserved', evidence=[], structure_warnings=[])
@@ -578,8 +593,8 @@ def resolve_document_structure(raw_pages, source_index, overrides=None):
         # Independent region evidence must match both text and the complete box.
         region_roles = []
         for region in page_info.get('regions', []):
-            area = (block['bbox'][2]-block['bbox'][0])*(block['bbox'][3]-block['bbox'][1])
-            box, other = block['bbox'], region['bbox']
+            box, other = block.get('source_bbox', block['bbox']), region['bbox']
+            area = (box[2]-box[0])*(box[3]-box[1])
             # Independent vision passes have coordinate jitter. Only compact
             # marginal blocks can use this tolerance, with the same source text
             # and the same edge; it never expands a deletion band over prose.
@@ -605,7 +620,15 @@ def resolve_document_structure(raw_pages, source_index, overrides=None):
         # Short-lived section headers still share the book's running band and
         # smaller font. This evidence is independent of the model's role label.
         font_weights = defaultdict(int)
+        note_boxes = [b.get('source_bbox',b['bbox']) for b in all_blocks if b['page']==number
+                      and (b['kind']=='footnote' or b.get('role_candidate')=='footnote')]
         for line in page_info.get('lines', []):
+            # Long notes can contain more characters than the body. They must
+            # not make the running header look like the page's normal font.
+            box=line['bbox']
+            if box[1]<.1 or any(n[0]-.01<=box[0] and box[2]<=n[2]+.01
+                               and n[1]-.01<=box[1] and box[3]<=n[3]+.01 for n in note_boxes):
+                continue
             font_weights[round(line.get('font_size',0))] += len(line['source_text'])
         body_font = max(font_weights,key=font_weights.get) if font_weights else 0
         small_native = any(b['page']==number and b.get('font_size',body_font)<body_font*.9 for b in native_peers)
@@ -667,7 +690,8 @@ def resolve_document_structure(raw_pages, source_index, overrides=None):
             if (previous and block.get('structure_node') and block.get('structure_node') == previous.get('structure_node')
                     and block['role'] == previous['role'] == 'heading'
                     and 0 <= block['bbox'][1]-previous['bbox'][3] <= .025):
-                previous['markdown'] += ' '+title_text(block['markdown'])
+                if block['id'] not in previous.get('translation_source_ids', []):
+                    previous['markdown'] += ' '+title_text(block['markdown'])
                 previous.setdefault('source_ids', [previous['id']]).append(block['id'])
                 block.update(excluded=True, merged_into=previous['id'])
             else:
@@ -675,12 +699,22 @@ def resolve_document_structure(raw_pages, source_index, overrides=None):
         page['structure_version'] = STRUCTURE_VERSION
         for block in page['blocks']:
             block['structure_rendered'] = {k:copy.deepcopy(block[k]) for k in ('kind','markdown','bbox')}
-    return dict(pages=pages, tree=nodes, diagnostics=diagnostics, version=STRUCTURE_VERSION,
+    from semantic_document import bind_notes
+    notes, note_diagnostics = bind_notes(pages, index)
+    diagnostics.extend(note_diagnostics)
+    for page in pages:
+        for block in page['blocks']:
+            if block.get('translation_warning'):
+                diagnostics.append(dict(page=block['page'],block=block['id'],bbox=block['bbox'],
+                                        reason='translation_failed',detail=block['translation_warning']))
+            block['structure_rendered'] = {k:copy.deepcopy(block[k]) for k in ('kind','markdown','bbox')}
+    return dict(pages=pages, tree=nodes, notes=notes, diagnostics=diagnostics, version=STRUCTURE_VERSION,
                 key=fingerprint([STRUCTURE_VERSION, index.get('key'), raw_pages, overrides]))
 
 
 def resolve_cached(raw_pages, source_index, cache, overrides=None):
-    key = fingerprint([STRUCTURE_VERSION, source_index, raw_pages, overrides or {}])
+    from semantic_document import VERSION as SEMANTIC_VERSION
+    key = fingerprint([STRUCTURE_VERSION, SEMANTIC_VERSION, source_index, raw_pages, overrides or {}])
     path = Path(cache)/('structure-'+key+'.json')
     value = _read(path)
     if value and value.get('cache_key') == key:
