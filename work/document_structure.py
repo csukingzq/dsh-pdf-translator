@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pymupdf
 
-STRUCTURE_VERSION = 'document-structure-v1'
+STRUCTURE_VERSION = 'document-structure-v2'
 # Evidence format changes independently: resolver upgrades must not buy the
 # same vision observations again. The initial format shares the v1 identifier.
 SOURCE_EVIDENCE_VERSION = 'document-structure-v1'
@@ -40,6 +40,8 @@ def title_text(text):
 
 def normal(text):
     text = unicodedata.normalize('NFKC', title_text(text)).casefold()
+    text = re.sub(r'^chapter\s+(\d+)\s*[:.]?\s*', r'\1 ', text)
+    text = re.sub(r'^第\s*(\d+)\s*章\s*', r'\1 ', text)
     return ''.join(c for c in text if c.isalnum())
 
 
@@ -54,10 +56,14 @@ def number_key(text):
     text = title_text(text)
     chapter = re.match(r'^chapter\s+(\d+|[ivxlcdm]+)\b', text, re.I)
     if chapter:
-        return 'chapter', chapter[1].casefold()
+        return 'number', str(_page_number(chapter[1])[1])
     chinese = re.match(r'^第\s*([\d一二三四五六七八九十百]+)\s*章', text)
     if chinese:
-        return 'chapter', chinese[1]
+        value = chinese[1]
+        if not value.isdigit():
+            digits = dict(zip('一二三四五六七八九', range(1,10)))
+            value = str((digits.get(value.split('十')[0],1)*10 + digits.get(value.split('十')[-1],0)) if '十' in value else digits.get(value,value))
+        return 'number', value
     section = re.match(r'^[^\w\d]*(\d+(?:\.\d+)*)(?:[.*]|\s)', text)
     return ('number', section[1]) if section else None
 
@@ -278,6 +284,20 @@ def build_source_index(source, selected, cache=None, analysis_config=None, analy
                     matches = [n for n in index['nodes'] if n['parent_id'] == parent['id']
                                and n['level'] == entry['level'] and number_key(n['title']) == key_number
                                and similarity(n['title'],entry['title']) >= .6]
+            if not matches:
+                parsed = _page_number(entry['printed_page'])
+                targets = [] if parsed is None else [s['offset']+parsed[1] for s in index['page_map']
+                    if s['style']==parsed[0] and s['printed_start']<=parsed[1]<=s['printed_end']]
+                # An independently mapped page plus exact title can expose a
+                # TOC level error. Keep the existing parent instead of cloning.
+                matches = [n for n in index['nodes'] if n.get('page') in targets
+                           and similarity(n['title'],entry['title']) >= .98]
+            parsed = _page_number(entry['printed_page'])
+            mapped = [] if parsed is None else [s['offset']+parsed[1] for s in index['page_map']
+                if s['style']==parsed[0] and s['printed_start']<=parsed[1]<=s['printed_end']]
+            located = [n for n in matches if n.get('page') in mapped]
+            if located:
+                matches = located
             matches.sort(key=lambda n:similarity(n['title'],entry['title']), reverse=True)
             if len(matches)>1 and similarity(matches[0]['title'],entry['title'])-similarity(matches[1]['title'],entry['title']) >= .05:
                 matches=matches[:1]
@@ -319,7 +339,7 @@ def _source_text(block, page_evidence):
 
 
 def _edge(block):
-    x0, y0, x1, y1 = block['bbox']
+    x0, y0, x1, y1 = block.get('source_bbox', block['bbox'])
     if y1-y0 > .065 or len(block.get('source_text', block['markdown'])) > 160:
         return None
     return 'top' if y1 <= .12 else 'bottom' if y0 >= .88 else None
@@ -327,6 +347,54 @@ def _edge(block):
 
 def _running_key(text):
     return re.sub(r'\d+', '#', normal(text))
+
+
+def native_regions(lines):
+    """Join baseline fragments, but never bridge the gap to a folio."""
+    result = list(lines)
+    rows = []
+    for line in sorted(lines, key=lambda l:(round(l['bbox'][1], 2), l['bbox'][0])):
+        row = next((r for r in rows if abs(r[0]['bbox'][1]-line['bbox'][1]) < .004), None)
+        if row is None:
+            rows.append([line])
+        else:
+            row.append(line)
+    for row in rows:
+        if len(row)>1 and any(_page_number(l['source_text']) for l in row):
+            ordered = sorted(row,key=lambda l:l['bbox'][0])
+            result.append(dict(source_text=' '.join(l['source_text'] for l in ordered),
+                bbox=[min(l['bbox'][0] for l in row),min(l['bbox'][1] for l in row),max(l['bbox'][2] for l in row),max(l['bbox'][3] for l in row)],
+                font_size=max(l.get('font_size',0) for l in row)))
+        group = []
+        for line in sorted(row, key=lambda l:l['bbox'][0]):
+            if group and line['bbox'][0]-group[-1]['bbox'][2] > .045:
+                group = []
+            group.append(line)
+            if len(group)>1:
+                result.append(dict(source_text=' '.join(l['source_text'] for l in group),
+                    font_size=max(l.get('font_size',0) for l in group),
+                    bbox=[min(l['bbox'][0] for l in group), min(l['bbox'][1] for l in group),
+                          max(l['bbox'][2] for l in group), max(l['bbox'][3] for l in group)]))
+    return result
+
+
+def locate_source(block, regions):
+    candidates = []
+    for region in regions:
+        box = region['bbox']
+        area = (box[2]-box[0])*(box[3]-box[1])
+        score = similarity(block['source_text'], region['source_text'])
+        near = abs((box[1]+box[3]-block['bbox'][1]-block['bbox'][3])/2) <= .02
+        if score >= .94 and (_intersection(box, block['bbox']) >= area*.3 or (score==1 and near)):
+            candidates.append((score, region))
+    candidates = list({(score,tuple(region['bbox'])):(score,region) for score,region in candidates}.values())
+    exact = [pair for pair in candidates if pair[0]==1]
+    if len(exact)==1:
+        return exact[0][1]['bbox']
+    candidates.sort(key=lambda pair:pair[0], reverse=True)
+    if candidates and (len(candidates)==1 or candidates[0][0]-candidates[1][0] >= .03):
+        return candidates[0][1]['bbox']
+    return None
 
 
 def validate_override(value):
@@ -348,12 +416,15 @@ def resolve_document_structure(raw_pages, source_index, overrides=None):
     diagnostics = copy.deepcopy(index.get('diagnostics', []))
     groups = defaultdict(list)
     native_margins = defaultdict(list)
+    native_bands = defaultdict(set)
     for number, evidence in index.get('pages', {}).items():
-        for line in evidence.get('lines', []):
+        for line in native_regions(evidence.get('lines', [])):
             pseudo = dict(line, markdown=line['source_text'])
             edge = _edge(pseudo)
             if edge:
                 native_margins[(_running_key(line['source_text']), edge)].append(dict(pseudo,page=int(number)))
+                if line.get('font_size'):
+                    native_bands[(round(line['bbox'][1],2), round(line['font_size']),edge)].add(int(number))
     all_blocks = []
     legacy_pages = []
     for page in pages:
@@ -376,6 +447,10 @@ def resolve_document_structure(raw_pages, source_index, overrides=None):
             for field in ('excluded', 'heading_level', 'parent_id', 'structure_node', 'merged_into', 'source_ids'):
                 block.pop(field, None)
             block['source_text'] = _source_text(block, evidence)
+            block.pop('source_bbox', None)
+            anchor = locate_source(block, native_regions(evidence.get('lines', [])))
+            if anchor:
+                block['source_bbox'] = anchor
             block.update(role='body', excluded=False, decision_source='preserved', evidence=[], structure_warnings=[])
             all_blocks.append(block)
             edge = _edge(block)
@@ -406,9 +481,15 @@ def resolve_document_structure(raw_pages, source_index, overrides=None):
             if score < .84:
                 continue
             edge = _edge(block)
-            if edge:
+            # A page edge alone is not evidence against a real section title.
+            # Penalize independently located repeated running regions only.
+            box = block.get('source_bbox', block['bbox'])
+            repeated = [b for b in native_margins.get((_running_key(block['source_text']), edge), [])
+                        if abs(b['bbox'][1]-box[1]) < .012]
+            if edge and (len({b['page'] for b in repeated}) >= 3 or
+                         block.get('role_candidate') in MARGINAL):
                 score -= .25
-            if node.get('y') is not None:
+            if node.get('y') is not None and abs(box[1]-node['y']) < .15:
                 score -= min(.1, abs(block['bbox'][1]-node['y'])/4)
             candidates.append((score, block['id'], [block]))
         for page in pages:
@@ -512,21 +593,47 @@ def resolve_document_structure(raw_pages, source_index, overrides=None):
                  and abs(b['bbox'][0]-block['bbox'][0]) <= .12
                  and b['id'] not in matches and b.get('role_candidate') not in {'footnote', 'body_label', 'caption'}]
         repeat = len({b['page'] for b in peers}) >= 3
+        tight = block.get('source_bbox', block['bbox'])
         native_peers = [b for b in native_margins.get((_running_key(block['source_text']),edge), [])
-                        if abs(b['bbox'][1]-block['bbox'][1]) <= .025
-                        and abs(b['bbox'][0]-block['bbox'][0]) <= .12]
+                        if abs(b['bbox'][1]-tight[1]) <= .012
+                        and abs(b['bbox'][0]-tight[0]) <= .12]
         native_repeat = len({b['page'] for b in native_peers}) >= 3
         native_match = any(b['page']==number and similarity(b['source_text'],block['source_text'])>=.85
-                           and _intersection(b['bbox'],block['bbox']) >=
-                           (block['bbox'][2]-block['bbox'][0])*(block['bbox'][3]-block['bbox'][1])*.8
+                           and _intersection(b['bbox'],tight) >=
+                           (tight[2]-tight[0])*(tight[3]-tight[1])*.8
                            for b in native_peers)
+        # Short-lived section headers still share the book's running band and
+        # smaller font. This evidence is independent of the model's role label.
+        font_weights = defaultdict(int)
+        for line in page_info.get('lines', []):
+            font_weights[round(line.get('font_size',0))] += len(line['source_text'])
+        body_font = max(font_weights,key=font_weights.get) if font_weights else 0
+        small_native = any(b['page']==number and b.get('font_size',body_font)<body_font*.9 for b in native_peers)
+        band_match = any(b['page']==number and b.get('font_size',body_font)<body_font*.9
+            and len(native_bands[(round(b['bbox'][1],2),round(b.get('font_size',0)),edge)])>=3
+            for b in native_peers)
+        native_repeat = (native_repeat or band_match) and (small_native or not body_font)
+        if edge=='bottom' and role=='running_footer' and 'source_bbox' in block:
+            small = [l for l in page_info.get('lines',[]) if similarity(l['source_text'],block['source_text'])>=.94
+                     and l.get('font_size',body_font)<body_font*.9]
+            if small:
+                region_roles.append(role)
         numeric = _page_number(block['source_text'])
         sequence = False
         if numeric and (peers or native_peers):
-            offsets = {b['page']-_page_number(b['source_text'])[1] for b in peers+native_peers if _page_number(b['source_text'])}
-            sequence = (repeat or (native_repeat and native_match)) and len(offsets) == 1
+            support = defaultdict(set)
+            for b in peers+native_peers:
+                parsed = _page_number(b['source_text'])
+                if parsed and parsed[0] == numeric[0]:
+                    support[b['page']-parsed[1]].add(b['page'])
+            offset = number-numeric[1]
+            # Evaluate the candidate's run, not unanimity of every numeric glyph.
+            sequence = len(support[offset]) >= 3 and (native_match or repeat)
+            if index.get('page_map'):
+                sequence = sequence and any(s['style']==numeric[0] and s['offset']==offset
+                    and s['physical_start'] <= number <= s['physical_end'] for s in index['page_map'])
         structural_start = any(n.get('page') == number and n['level'] == 1 for n in nodes)
-        protected_heading = role == 'heading' or (structural_start and block['kind'] == 'heading')
+        protected_heading = (role == 'heading' or (structural_start and block['kind'] == 'heading')) and not (native_repeat and native_match)
         if edge and not protected_heading and (sequence or
                 (repeat and not numeric and (role in MARGINAL or any(r in MARGINAL for r in region_roles))) or
                 (native_repeat and native_match and not numeric) or

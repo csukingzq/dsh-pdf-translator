@@ -29,6 +29,56 @@ def index(nodes=None, pages=None):
 
 
 class StructureTests(unittest.TestCase):
+    def test_font_rounding_never_turns_short_body_into_margin(self):
+        evidence=index()
+        for n in range(1,5):
+            evidence['pages'][str(n)]=dict(lines=[
+                dict(source_text='Therefore,',bbox=[.1,.08,.3,.10],font_size=9.963),
+                dict(source_text='A longer body paragraph with normal text and mathematical context.',bbox=[.1,.2,.9,.24],font_size=9.963),
+                dict(source_text='Running title',bbox=[.1,.04,.3,.06],font_size=8.468)])
+        raw=[page(n,block('Therefore,',[.1,.08,.3,.10]),block('Running title',[.1,.04,.3,.06],'heading','heading')) for n in range(1,5)]
+        result=self.resolve(raw,evidence)
+        for p in result['pages']:
+            self.assertFalse(p['blocks'][0]['excluded'])
+            self.assertTrue(p['blocks'][1]['excluded'])
+    def test_fragmented_native_header_and_folio_shared_box_with_outliers(self):
+        evidence = index()
+        for n in list(range(28,35))+[84,500]:
+            folio = str(n-27) if n < 35 else '2' if n==84 else '7'
+            evidence['pages'][str(n)] = dict(lines=[
+                dict(source_text='1.2',bbox=[.1,.04,.14,.055]),
+                dict(source_text='Machine Arithmetic',bbox=[.16,.04,.4,.055]),
+                dict(source_text=folio,bbox=[.88,.04,.9,.055])])
+        evidence['nodes']=[node('section','1.2 Machine Arithmetic',28,2)]
+        raw=[page(28,block('1.2 Machine Arithmetic',[.1,.04,.9,.06],'heading','heading'),
+                     block('1',[.1,.04,.9,.06]),
+                     block('1.2 Machine Arithmetic',[.1,.09,.8,.12],'heading','heading'),
+                     block('Important short body',[.1,.14,.5,.17]))]
+        blocks=self.resolve(raw,evidence)['pages'][0]['blocks']
+        self.assertEqual([b['role'] for b in blocks],['running_header','page_number','heading','body'])
+        self.assertEqual([b['excluded'] for b in blocks],[True,True,False,False])
+
+    def test_chapter_number_aliases(self):
+        from document_structure import number_key
+        self.assertEqual(number_key('Chapter I: Computation'),number_key('1 Computation'))
+        self.assertEqual(number_key('第1章 Computation'),number_key('1 Computation'))
+
+    def test_contents_short_chapter_title_reuses_bookmark_parent(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source=Path(temporary)/'synthetic.pdf'
+            with pymupdf.open() as pdf:
+                for _ in range(3):pdf.new_page()
+                pdf.set_toc([[1,'Contents',1],[1,'Chapter 4: Equations',2],[2,'4.1 Examples',3]])
+                pdf.save(source)
+            def analyze(images):
+                return {'pages':[dict(page=n,is_contents=n==1,printed_page=str(n),regions=[],entries=[
+                    dict(title='4 Equations',level=1,printed_page='2'),dict(title='4.1 Examples',level=2,printed_page='3')
+                ] if n==1 else []) for n,_ in images]}
+            result=build_source_index(source,[2,3],analyze=analyze)
+            self.assertEqual(len(result['nodes']),3)
+            self.assertFalse(result['diagnostics'])
+            self.assertEqual(result['nodes'][2]['parent_id'],result['nodes'][1]['id'])
+
     def resolve(self, pages, evidence=None, overrides=None):
         return resolve_document_structure(pages, evidence or index(), overrides)
 

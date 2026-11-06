@@ -60,6 +60,27 @@ async function managerFixture(t){
   m.state.tasks.push({id:'pdf-test',owner:'a',aiReview:true,args:{pdf:'sample.pdf'},identity:'hash',status:'reviewing',result:{output:'good.pdf'},review:{status:'pending',rounds:0,version:null}});
   return m;
 }
+
+test('review forwards offline recompute, diagnostics and partial edits with durable coverage',async t=>{
+  const m=await managerFixture(t),task=m.state.tasks[0],requests=[];
+  m.runner=async r=>{
+    requests.push(r);
+    return {version:r.action==='apply'?'v1':'v0',totalPages:54,inspectedPages:[28,29,30],pages:[{page:30}],
+      nextCall:{action:'inspect'},result:r.action==='finish'?{status:'needs_review',review:{verification:'核验未完成',coverage:{inspectedPages:3,totalPages:54}}}:undefined};
+  };
+  const call=(action,args={})=>m.review.call({jobId:task.id,action,...args},'a');
+  const inspection=await call('inspect');
+  assert.deepEqual(task.review.seen,[28,29,30]);assert.equal(inspection.nextCall.jobId,task.id);
+  await call('diagnostics',{reason:'sample',cursor:25,limit:10});
+  assert.equal(requests.at(-1).cursor,25);
+  await assert.rejects(call('apply',{version:'v0',pages:[{}],blockEdits:[{id:'p28-b1'}]}),/互斥/);
+  await call('apply',{version:'v0',recomputeStructure:true,blockEdits:[{id:'p28-b1',structure_override:{role:'body'}}]});
+  assert.equal(requests.at(-1).recomputeStructure,true);assert.equal(task.review.rounds,1);
+  assert.deepEqual(task.review.seen,[]);
+  await call('finish',{version:'v1',summary:'已完成',remaining:['尚未读完']});
+  assert.equal(task.result.status,'needs_review');assert.equal(task.review.verification,'核验未完成');
+  assert.equal(task.review.coverage.inspectedPages,3);
+});
 test('review authorization, version, two rounds, failed compile retention, finish idempotency',async t=>{
   const m=await managerFixture(t),task=m.state.tasks[0];
   const call=(action,extra={},owner='a')=>m.review.call({jobId:task.id,action,...extra},owner);

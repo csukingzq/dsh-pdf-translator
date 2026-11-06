@@ -12,6 +12,50 @@ import review_pipeline as review
 
 
 class ReviewTests(unittest.TestCase):
+    def test_offline_recompute_preserves_override_and_requires_version(self):
+        with self.assertRaisesRegex(ValueError,'expectedVersion'):
+            self.invoke('apply',expectedVersion=None,recomputeStructure=True)
+        review.save(self.cache/'pages/0001/result.json',self.page)
+        with patch.object(review,'render_latex',self.render), patch('socket.create_connection',side_effect=AssertionError('network forbidden')):
+            self.invoke('apply',blockEdits=[{'id':'p1-b1','markdown':'accepted','structure_override':{'role':'body'}}],recomputeStructure=True)
+        block=review.read(self.task/'document.json')['pages'][0]['blocks'][0]
+        self.assertEqual(block['markdown'],'accepted')
+        self.assertEqual(block['role'],'body')
+        self.assertEqual(block['decision_source'],'review_override')
+
+    def test_inspect_advances_resumes_and_compacts(self):
+        document=review.read(self.task/'document.json')
+        document['pages']=[dict(copy.deepcopy(self.page),page=n) for n in range(1,55)]
+        for p in document['pages']:
+            p['blocks'][0]['structure_original']={'markdown':'private duplicate'}
+        review.save(self.task/'document.json',document)
+        for n in range(1,4):
+            result=self.invoke('inspect')
+            self.assertEqual(result['pages'][0]['page'],n)
+            self.assertNotIn('structure_original',result['pages'][0]['blocks'][0])
+        self.assertEqual(self.invoke('inspect',page=1)['nextPage'],4)
+        result=self.invoke('finish',summary='claimed complete')
+        self.assertEqual(result['result']['status'],'needs_review')
+        self.assertEqual(result['result']['review']['coverage']['inspectedPages'],3)
+        self.assertEqual(result['result']['review']['verification'],'核验未完成')
+        for n in range(4,55):
+            self.assertEqual(self.invoke('inspect')['pages'][0]['page'],n)
+        self.assertTrue(self.invoke('inspect')['complete'])
+        self.assertEqual(self.invoke('inspect')['pages'],[])
+
+    def test_diagnostics_filter_cursor_and_partial_edits(self):
+        report=review.read(self.task/'report.json')
+        report['structure_warnings']=[dict(page=1,reason='sample',ordinal=i) for i in range(4)]
+        review.save(self.task/'report.json',report)
+        result=self.invoke('diagnostics',page=1,reason='sample',limit=2)
+        self.assertEqual(result['nextCursor'],2)
+        self.assertEqual(len(self.invoke('diagnostics',cursor=2)['diagnostics']),2)
+        with patch.object(review,'render_latex',self.render):
+            self.invoke('apply',blockEdits=[dict(id='p1-b1',markdown='局部修复',structure_override={'role':'body'})])
+        block=review.read(self.task/'document.json')['pages'][0]['blocks'][0]
+        self.assertEqual(block['markdown'],'局部修复')
+        self.assertEqual(block['decision_source'],'review_override')
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -42,7 +86,7 @@ class ReviewTests(unittest.TestCase):
                         'identity':review.digest(self.source)[:16],'result':self.result,'round':1,'remaining':[]}
 
     def invoke(self,action,**kwargs):
-        return review.execute({**self.request,'action':action,**kwargs})
+        return review.execute({**self.request,'action':action,'expectedVersion':review.digest(self.task/'document.json'),**kwargs})
 
     def snapshot(self):
         return {p:p.read_bytes() for p in self.root.rglob('*') if p.is_file() and 'review-transactions' not in p.parts}
