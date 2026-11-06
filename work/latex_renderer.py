@@ -166,48 +166,31 @@ HEADER = r"""
 \renewcommand{\dbltopfraction}{0.95}
 \renewcommand{\textfraction}{0.05}
 \renewcommand{\floatpagefraction}{0.75}
+\renewcommand{\dblfloatpagefraction}{0.75}
+% Do not distribute small floats across an otherwise empty page.
+\makeatletter
+\setlength{\@fptop}{0pt}
+\setlength{\@fpsep}{18pt plus 2pt}
+\setlength{\@fpbot}{0pt plus 1fil}
+\setlength{\@dblfptop}{0pt}
+\setlength{\@dblfpsep}{18pt plus 2pt}
+\setlength{\@dblfpbot}{0pt plus 1fil}
+\makeatother
+\newcommand{\DSHSymbolNote}[2]{\begingroup\renewcommand{\thefootnote}{#1}\footnote[0]{#2}\endgroup}
+\newcommand{\DSHSymbolMark}[1]{\begingroup\renewcommand{\thefootnote}{#1}\footnotemark[0]\endgroup}
+\newcommand{\DSHSymbolText}[2]{\begingroup\renewcommand{\thefootnote}{#1}\footnotetext[0]{#2}\endgroup}
+\newcommand{\DSHPublicationNote}[1]{\begingroup\renewcommand{\thefootnote}{}\footnotetext[0]{#1}\endgroup}
 \newsavebox{\displaybox}
 \newsavebox{\inlinebox}
 \newcommand{\InlineMath}[1]{%
   \sbox{\inlinebox}{$#1$}%
-  \ifdim\wd\inlinebox>\linewidth
-    \typeout{LATEX-TRANSLATOR: scaled wide inline}%
-    \unskip\hfil\break\noindent
-    \adjustbox{max width=\linewidth}{\usebox{\inlinebox}}\hfil\break
+  \ifdim\wd\inlinebox>.65\linewidth
+    \ifdim\wd\inlinebox>\linewidth\typeout{LATEX-TRANSLATOR: scaled wide inline}\fi
+    \par\noindent\makebox[\linewidth][c]{\adjustbox{max width=\linewidth}{\usebox{\inlinebox}}}\par\noindent
   \else\(#1\)\fi}
 \newlength{\formulawidth}
-% 公式比栏宽时不再整体缩小（会看不清），改为按关系符断行、保持原字号。
-% 带 array/aligned 的多行公式不能断行，仍用 \DisplayMathFit 等比缩放。
-\newcommand{\DisplayMath}[2]{%
-  \par\addvspace{0.65\baselineskip}%
-  \sbox{\displaybox}{$\displaystyle #1$}%
-  \setlength{\formulawidth}{\dimexpr\linewidth-4em\relax}%
-  \ifdim\wd\displaybox>\dimexpr 1.12\formulawidth\relax
-    \typeout{LATEX-TRANSLATOR: broken wide display}%
-    \begingroup
-      \leftskip=0pt plus 1fil \rightskip=0pt plus 1fil \parfillskip=0pt\relax
-      \noindent$\displaystyle #1$\par
-    \endgroup
-    \ifx\relax#2\relax\else
-      \begingroup\parfillskip=0pt\relax
-        \noindent\hfill\makebox[4em][r]{#2}\par
-      \endgroup
-    \fi
-  \else
-    \noindent\makebox[\linewidth]{%
-      \ifdim\wd\displaybox>\formulawidth
-        \typeout{LATEX-TRANSLATOR: scaled wide display}%
-        \makebox[\formulawidth]{\adjustbox{max width=\formulawidth}{\usebox{\displaybox}}}%
-        \makebox[4em][r]{#2}%
-      \else
-        \ifx\relax#2\relax
-          \usebox{\displaybox}%
-        \else
-          \makebox[\formulawidth]{\usebox{\displaybox}}\makebox[4em][r]{#2}%
-        \fi
-      \fi}%
-  \fi
-  \par\addvspace{0.65\baselineskip}}
+% Python 先按安全边界拆分长公式；公式与编号共享一行，余下不可分对象限宽。
+\newcommand{\DisplayMath}[2]{\DisplayMathFit{#1}{#2}}
 \newcommand{\DisplayMathFit}[2]{%
   \par\addvspace{0.65\baselineskip}%
   \sbox{\displaybox}{$\displaystyle #1$}%
@@ -334,11 +317,48 @@ def remove_tags(value):
 FIT_BODY = re.compile(r'\\(?:begin\{(?:array|aligned|alignedat|gathered|split|[pbBvV]?matrix|cases|smallmatrix)\}|substack)')
 
 
+def multiline_radical(body):
+    """Wrap an entire additive radicand without changing any mathematical token."""
+    value = body.strip()
+    if not value.startswith(r'\sqrt{'):
+        return body
+    end = _group(value, 5)
+    if value[end:] not in {'', '.', ','}:
+        return body
+    inner = value[6:end-1]
+    if len(inner) < 85:
+        return body
+    parts, start, depth, i = [], 0, 0, 0
+    while i < len(inner):
+        char = inner[i]
+        if char == '\\':
+            # Commands and escaped delimiters are indivisible.
+            match = re.match(r'\\(?:[A-Za-z]+|.)', inner[i:])
+            i += len(match[0]) if match else 1
+            continue
+        if char in '{([': depth += 1
+        elif char in '})]': depth -= 1
+        elif char == '+' and depth == 0:
+            parts.append(inner[start:i]); start = i
+        i += 1
+    parts.append(inner[start:])
+    if len(parts) < 4:
+        return body
+    lines, line = [], ''
+    for part in parts:
+        if line and len(line)+len(part)>48:
+            lines.append(line.strip()); line = ''
+        line += part
+    if line: lines.append(line.strip())
+    return r'\sqrt{\begin{gathered}' + r' \\ '.join(lines) + r'\end{gathered}}' + value[end:]
+
+
 def display_command(body):
     return r'\DisplayMathFit' if FIT_BODY.search(body) else r'\DisplayMath'
 
 
 def display_math(value):
+    value = multiline_radical(value)
     outer = re.fullmatch(r'\s*\\begin\{(aligned|gathered)\}(.*?)\\end\{\1\}\s*', value, re.S)
     if outer and r'\tag' in outer[2]:
         lines = []
@@ -355,6 +375,12 @@ def display_math(value):
     if len(tags)>1:
         raise ValueError('无法定位多个公式编号的所属行，请检查译文。')
     label = tags[0] if tags else ''
+    if not FIT_BODY.search(body) and len(body) > 85:
+        sides = split_math(body, '=')
+        if len(sides) >= 2 and len(sides[0]) < 45:
+            # Keep the equality and all tokens; separate the short LHS from an
+            # indivisible sum/product instead of spilling it under the number.
+            body = r'\begin{gathered}' + sides[0] + r'= \\ ' + '='.join(sides[1:]) + r'\end{gathered}'
     if label and not re.fullmatch(r'[\w.()\- ]+', label):
         label = r'\ensuremath{'+label+'}'
     return display_command(body)+'{'+body+'}{'+label+'}'
@@ -763,7 +789,40 @@ def apply_regions(tex, columns=1):
         first = tex.find(r'\typeout{TRANSLATOR-COLUMNS-BEGIN')
         if first > anchor and tex[anchor:first].strip():
             # The title block belongs to the full width above both columns.
-            tex = (tex[:anchor]+'\n'+r'\twocolumn[{' + tex[anchor:first] + '}]'+'\n'+tex[first:])
+            title = tex[anchor:first]
+            special_texts = []
+            while True:
+                special = re.search(r'\\DSH(SymbolNote|PublicationNote)\{',title)
+                if not special: break
+                first_end = _group(title,special.end()-1)
+                first_arg = title[special.end():first_end-1]
+                if special[1] == 'SymbolNote':
+                    second_start = first_end
+                    while title[second_start].isspace(): second_start += 1
+                    last = _group(title,second_start)
+                    body = title[second_start+1:last-1]
+                    special_texts.append(r'\DSHSymbolText{'+first_arg+'}{'+body+'}')
+                    mark = r'\DSHSymbolMark{'+first_arg+'}'
+                else:
+                    last = first_end
+                    special_texts.append(title[special.start():last])
+                    mark = ''
+                title = title[:special.start()] + mark + title[last:]
+            special_texts.sort(key=lambda value:value.startswith(r'\DSHPublicationNote'))
+            notes = []
+            while True:
+                match = re.search(r'\\footnote\{', title)
+                if not match:
+                    break
+                end = _group(title, match.end()-1)
+                notes.append(title[match.end():end-1])
+                title = title[:match.start()] + r'\footnotemark{}' + title[end:]
+            # Footnote insertions inside the twocolumn optional box are lost.
+            # Keep marks in the title and emit texts in the outer vertical list.
+            texts = ''.join(r'\footnotetext[\number\numexpr\value{footnote}-'
+                            + str(len(notes)-i-1) + r'\relax]{' + note + '}\n'
+                            for i, note in enumerate(notes))
+            tex = (tex[:anchor]+'\n'+r'\twocolumn[{' + title + '}]'+'\n'+texts+'\n'.join(special_texts)+'\n'+tex[first:])
     for pattern, replace in region_patterns(columns):
         tex = pattern.sub(replace, tex)
     return tex
@@ -801,6 +860,11 @@ def validate_layout(layout):
 
 
 def build_project(text, source_dir, project):
+    header_match = re.search(r'<!-- translator-source-header: ([A-Za-z0-9+/=]+) -->', text)
+    source_header = base64.b64decode(header_match[1]).decode('utf8') if header_match else ''
+    text = re.sub(r'<!-- translator-source-header: [A-Za-z0-9+/=]+ -->', '', text)
+    source_has_header = bool(source_header)
+    text = text.replace('<!-- translator-running-header: true -->', '')
     pandoc, _ = binaries()
     layout_path = Path(source_dir)/'layout.json'
     layout = validate_layout(json.loads(layout_path.read_text('utf-8'))) if layout_path.exists() else {}
@@ -850,6 +914,15 @@ def build_project(text, source_dir, project):
 
     def visit(node):
         if isinstance(node, list):
+            for i, item in enumerate(node[:-1]):
+                following = node[i+1]
+                if (isinstance(item, dict) and item.get('t') == 'Math'
+                        and item['c'][0]['t'] == 'InlineMath'
+                        and not re.fullmatch(r'\^(?:\{\d+\}|\d+)',item['c'][1].strip())
+                        and isinstance(following, dict) and following.get('t') == 'Str'
+                        and following['c'][:1] in {'。','，','；',',',';','.'}):
+                    item['_trailing_punctuation'] = following['c'][0]
+                    following['c'] = following['c'][1:]
             return [visit(x) for x in node]
         if not isinstance(node, dict):
             return node
@@ -879,13 +952,28 @@ def build_project(text, source_dir, project):
             cells = []
             for figure in figures:
                 cells.append(r'\begin{minipage}[t]{' + width + r'}\centering' + '\n'
-                             + r'\adjustbox{max width=\linewidth,max height=' + str(layout.get('figureMaxHeight',.45)) + r'\textheight}{\includegraphics{'
+                             + r'\adjustbox{max width=\linewidth,max height=' + str(layout.get('figureMaxHeight',.55)) + r'\textheight}{\includegraphics{'
                              + figure['image'] + r'}}\par' + '\n' + figure['caption'] + '\n' + r'\end{minipage}')
             return {'t':'RawBlock','c':['latex',r'\par\noindent' + r'\hfill'.join(cells) + r'\par']}
         if kind == 'Div' and 'figure-group' in content[0][1]:
             inner = run([pandoc,'-f','json','-t','latex'],
                         json.dumps({**ast,'blocks':visit(content[1])})).strip()
             return {'t':'RawBlock','c':['latex',r'\par\noindent\begin{minipage}{\linewidth}'+'\n'+inner+'\n'+r'\end{minipage}\par']}
+        if kind == 'Note':
+            match = re.search(r'DSHNOTESYMBOL([0-9a-f]+)END',json.dumps(content))
+            if match:
+                symbol = bytes.fromhex(match[1]).decode()
+                def strip_marker(value):
+                    if isinstance(value,list): return [strip_marker(v) for v in value]
+                    if isinstance(value,dict): return {k:strip_marker(v) for k,v in value.items()}
+                    if isinstance(value,str): return value.replace(match[0],'')
+                    return value
+                blocks = visit(strip_marker(content))
+                body = run([pandoc,'-f','json','-t','latex'],json.dumps({**ast,'blocks':blocks})).strip()
+                return {'t':'RawInline','c':['latex',r'\DSHSymbolNote{'+symbol+'}{'+body+'}']}
+        if kind == 'Div' and 'publication-note' in content[0][1]:
+            body = run([pandoc,'-f','json','-t','latex'],json.dumps({**ast,'blocks':visit(content[1])})).strip()
+            return {'t':'RawBlock','c':['latex',r'\DSHPublicationNote{'+body+'}']}
         if kind == 'Str' and re.search(r'DSHNOTE(?:LABEL|REF)[0-9a-f]+END', content):
             parts = []
             for fragment in re.split(r'(DSHNOTE(?:LABEL|REF)[0-9a-f]+END)', content):
@@ -910,7 +998,7 @@ def build_project(text, source_dir, project):
             keep_caption = ['keep-with-caption','true'] in content[0]['c'][0][2]
             picture = visit(content[0])
             target = picture['c'][2][0]
-            bounds = f"max width={layout.get('figureMaxWidth',.85)}\\linewidth,max height={layout.get('figureMaxHeight',.25)}\\textheight"
+            bounds = f"max width={layout.get('figureMaxWidth',1)}\\linewidth,max height={layout.get('figureMaxHeight',.55)}\\textheight"
             return {'t': 'RawBlock', 'c': ['latex', r'\begin{center}\adjustbox{' + bounds + r'}{\includegraphics{' + target + r'}}\end{center}' + (r'\nopagebreak[4]' if keep_caption else '')]}
         if kind == 'Para' and len(content) == 1 and content[0].get('t') == 'Str' and content[0]['c'] in tables:
             return visit(tables[content[0]['c']])
@@ -927,7 +1015,9 @@ def build_project(text, source_dir, project):
             # Retain source footnote markers for the later binding pass.
             if re.fullmatch(r'\^(?:\{\d+\}|\d+)', value.strip()):
                 return {'t': 'Math', 'c': [content[0], value]}
-            return {'t': 'RawInline', 'c': ['latex', start + r'\InlineMath{' + value + '}' + end]}
+            punctuation = node.get('_trailing_punctuation', '')
+            rendered_value = value + (r'\text{' + punctuation + '}' if punctuation else '')
+            return {'t': 'RawInline', 'c': ['latex', start + r'\InlineMath{' + rendered_value + '}' + end]}
         if kind == 'Image':
             target = content[2][0]
             match = re.fullmatch(r'data:image/(png|jpeg|jpg);base64,([A-Za-z0-9+/=\s]+)', target)
@@ -1054,7 +1144,13 @@ def build_project(text, source_dir, project):
     (project/'math-regions.json').write_text(json.dumps(math_regions, ensure_ascii=False, indent=2), encoding='utf-8')
     size = layout.get('fontSize',11)
     font_override = ('\n'+r'\AtBeginDocument{\fontsize{'+str(size)+'pt}{'+str(round(size*1.2,1))+r'pt}\selectfont}') if 'fontSize' in layout else ''
-    (project/'layout.tex').write_text(HEADER+font_override, encoding='utf-8')
+    header = HEADER
+    escaped_header = ''.join({'\\':r'\textbackslash{}','{':r'\{','}':r'\}',
+        '%':r'\%','#':r'\#','&':r'\&','_':r'\_','$':r'\$',
+        '^':r'\textasciicircum{}','~':r'\textasciitilde{}'}.get(c,c) for c in source_header)
+    header = header.replace(r'\fancyhead[C]{\small\nouppercase{\leftmark}}',
+        r'\fancyhead[C]{\scriptsize '+escaped_header+'}' if source_has_header else r'\fancyhead{}')
+    (project/'layout.tex').write_text(header+font_override, encoding='utf-8')
     # The bundled fvextra cannot break inside Pandoc's syntax token macros.
     # Plain verbatim preserves code and permits wrapping on every long line.
     tex = run([pandoc, '-f', 'json', '-t', 'latex', '-s', '--pdf-engine=xelatex', '--no-highlight',

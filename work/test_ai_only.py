@@ -61,7 +61,7 @@ class AiOnlyTests(unittest.TestCase):
         self.assertEqual((guide.width,guide.height),(300,400))
 
 
-    def test_unverified_figure_box_is_preserved_with_diagnostic_and_labels(self):
+    def test_unverified_figure_box_keeps_diagnostic_without_label_translation(self):
         block = {'id':'p1-b1', 'page':1, 'kind':'figure', 'bbox':[.13,.22,.87,.71],
                  'markdown':'Time：时间；Distance：距离。'}
         with tempfile.TemporaryDirectory() as folder, patch.object(pipeline, 'crop') as crop:
@@ -71,7 +71,8 @@ class AiOnlyTests(unittest.TestCase):
                 pdf.save(source)
             text = pipeline.block_markdown(block, source, Path(folder))
             self.assertEqual(crop.call_args.args[2], block['bbox'])
-            self.assertIn('Time：时间', text)
+            self.assertNotIn('Time：时间', text)
+            self.assertEqual(block['markdown'],'Time：时间；Distance：距离。')
             audit=json.loads((Path(folder)/'crop-report.json').read_text('utf-8'))
             self.assertEqual(audit['figures'][block['id']]['diagnostics'],['figure_native_geometry_unavailable'])
 

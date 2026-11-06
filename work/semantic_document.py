@@ -11,13 +11,16 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-VERSION = 'semantic-v2'
+VERSION = 'semantic-v3'
 SUPERSCRIPTS = str.maketrans('0123456789', '⁰¹²³⁴⁵⁶⁷⁸⁹')
 DEFINITION = re.compile(r'^\s*\[\^([^\]]+)\]:\s*')
 PROTECTED = re.compile(r'\$\$[\s\S]*?\$\$|(?<!\$)\$[^$\n]+\$|\[\^[^\]]+\]|`[^`]+`')
 
 
 def marker_of(block):
+    original = re.match(r'^\s*([*†‡])', block.get('source_text',''))
+    if original:
+        return original[1]
     match = DEFINITION.match(block.get('markdown', ''))
     if match and not match[1].startswith('note-'):
         return match[1]
@@ -75,11 +78,25 @@ def bind_notes(pages, source_index=None):
         marker = markers[b['id']]
         note_id = 'note-' + b['id']
         override = b.get('note_override')
+        original = b.get('source_text','').strip()
+        if (override is None and re.match(r'^(?:\d{4}-\d{3}[\dXx]|©|Copyright)', original, re.I)
+                and re.search(r'doi|rights reserved|copyright|©', original, re.I)):
+            b.update(note_id=note_id, note_marker=None, note_anchors=[], note_unlinked=False,
+                     note_type='publication', markdown=DEFINITION.sub('',b['markdown']).strip())
+            notes.append(dict(id=note_id,block=b['id'],marker=None,anchors=[],type='publication'))
+            continue
+        b.pop('note_type',None)
         candidates = [a for a in blocks if a['page'] == b['page'] and a is not b
                       and not a.get('excluded') and a.get('role') not in {'footnote', 'heading'}
                       and a['kind'] == 'paragraph']
         pattern = re.compile(marker_pattern(marker).pattern + '|'+re.escape('[^'+note_id+']')) if marker else None
         anchors = [a for a in candidates if pattern and pattern.search(a['markdown'])]
+        if marker in {'*','†','‡'}:
+            for a in candidates:
+                if is_author_list(a.get('source_text','')):
+                    author_marker=re.compile(re.escape(marker)+r'(?=\s*[,;，；]|\s*$)')
+                    if author_marker.search(a['markdown']):
+                        if a not in anchors: anchors.append(a)
         if not anchors and marker:
             evidence = (source_index or {}).get('pages',{}).get(str(b['page']),{})
             superscripts = [s for line in evidence.get('lines',[]) for s in line.get('superscripts',[])
@@ -110,7 +127,11 @@ def bind_notes(pages, source_index=None):
         if anchors:
             for a in anchors:
                 replacement = '[^' + note_id + ']'
-                if pattern and pattern.search(a['markdown']):
+                author_marker = (re.compile(re.escape(marker)+r'(?=\s*[,;，；]|\s*$)')
+                                 if marker in {'*','†','‡'} and is_author_list(a.get('source_text','')) else None)
+                if author_marker and author_marker.search(a['markdown']):
+                    a['markdown'] = author_marker.sub(lambda _:replacement,a['markdown'].replace(replacement,''))
+                elif pattern and pattern.search(a['markdown']):
                     a['markdown'] = pattern.sub(lambda _: replacement, a['markdown'])
                 elif replacement not in a['markdown']:
                     a['markdown'] += replacement
@@ -230,6 +251,23 @@ def batches_for(units):
     return batches
 
 
+def is_author_list(text):
+    """Conservative exemption for comma-separated personal names, not prose."""
+    parts = text.split(',')
+    if len(parts) < 2:
+        return False
+    names = 0
+    for part in parts:
+        words = re.findall(r"[A-Za-z]+(?:[-'][A-Za-z]+)*", part)
+        words = [w for w in words if w not in {'a', 'b', 'c', 'd', 'and'}]
+        if not words:  # separate affiliation/star marker
+            continue
+        if not 2 <= len(words) <= 5 or not all(w[0].isupper() for w in words):
+            return False
+        names += 1
+    return names >= 2
+
+
 def translate_document(pages, tree, cache, model_config, request, glossary=None, workers=4):
     """Translate fixed IDs; failed batches preserve originals with diagnostics."""
     pages = copy.deepcopy(pages)
@@ -254,6 +292,8 @@ def translate_document(pages, tree, cache, model_config, request, glossary=None,
                                        sort_keys=True).encode()).hexdigest()
         path = folder/(key+'.json')
         error = None
+        accepted = {}
+        failures = {}
         for attempt in range(3):
             try:
                 if any(sum(1 if ord(c)>127 else .33 for c in u['text'])>2000 for u in batch):
@@ -263,17 +303,26 @@ def translate_document(pages, tree, cache, model_config, request, glossary=None,
                 if len(rows) != len(ids) or {r['id'] for r in rows} != ids:
                     raise ValueError('翻译单元 ID 缺失或重复')
                 values = {r['id']: r['text'] for r in rows}
-                checked = {u['id']: restore(values[u['id']], u['protected']) for u in batch}
-                if any(not t.strip() for t in checked.values()):
-                    raise ValueError('翻译返回空内容')
+                failures = {}
                 for u in batch:
-                    is_reference=any(re.search(r'references|bibliography|参考文献',title,re.I) for title in u['chapter'])
-                    publication=(u.get('role_candidate')=='running_footer'
-                                 and re.search(r'©|copyright|\bDOI\b|\bISBN\b',u['text'],re.I))
-                    if (not is_reference and not publication and len(re.findall('[A-Za-z]',u['text']))>40
-                            and not re.search('[\u4e00-\u9fff]',values[u['id']])):
-                        raise ValueError('英文正文未翻译，保留原文等待核验')
-                translated.update(checked)
+                    if u['id'] in accepted:
+                        continue
+                    try:
+                        value = restore(values[u['id']], u['protected'])
+                        if not value.strip():
+                            raise ValueError('翻译返回空内容')
+                        is_reference = any(re.search(r'references|bibliography|参考文献', title, re.I) for title in u['chapter'])
+                        publication = (u.get('role_candidate') == 'running_footer'
+                                       and re.search(r'©|copyright|\bDOI\b|\bISBN\b', u['text'], re.I))
+                        if (not is_reference and not publication and not is_author_list(u['text']) and len(re.findall('[A-Za-z]', u['text'])) > 40
+                                and not re.search('[\u4e00-\u9fff]', values[u['id']])):
+                            raise ValueError('英文正文未翻译，保留原文等待核验')
+                        accepted[u['id']] = value
+                    except (ValueError, KeyError, TypeError) as exc:
+                        failures[u['id']] = str(exc)
+                if failures:
+                    raise ValueError('; '.join(f'{key}: {value}' for key, value in failures.items()))
+                translated.update(accepted)
                 temp = path.with_suffix('.tmp')
                 temp.write_text(json.dumps(response, ensure_ascii=False), 'utf-8')
                 temp.replace(path)
@@ -284,6 +333,10 @@ def translate_document(pages, tree, cache, model_config, request, glossary=None,
                     path.unlink()
         else:
             for u in batch:
+                if u['id'] in accepted:
+                    translated[u['id']] = accepted[u['id']]
+                    continue
+                error = failures.get(u['id'], error)
                 translated[u['id']] = restore(u['text'], u['protected'])
                 by_id[u['block']]['translation_warning'] = error
                 diagnostics.append(dict(page=u['page'], block=u['block'], reason='translation_failed', detail=error))

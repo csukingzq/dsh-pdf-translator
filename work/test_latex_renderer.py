@@ -10,6 +10,85 @@ from document_structure import resolve_document_structure
 
 
 class LatexRendererTests(unittest.TestCase):
+    def test_special_title_notes_are_visible_without_numeric_marks(self):
+        import pymupdf
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);output=root/'special.pdf'
+            text='Authors[^star]\n\n::: {.publication-note}\n\nCopyright unique publication.\n\n:::\n\n<!-- translator-columns: 2 -->\n\nBody text.\n\n<!-- translator-columns-end -->\n\n[^star]: DSHNOTESYMBOL2aEND Unique correspondence.'
+            render_latex(text,root,output)
+            tex=(root/'special/main.tex').read_text('utf8')
+            self.assertIn(r'\DSHSymbolMark{*}',tex)
+            with pymupdf.open(output) as pdf:
+                visible=''.join(p.get_text() for p in pdf)
+                self.assertIn('Unique correspondence.',visible)
+                self.assertIn('Copyright unique publication.',visible)
+
+    def test_inline_punctuation_travels_with_math(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            build_project('结果为$x+y$。继续。',root,root)
+            tex=(root/'main.tex').read_text('utf8')
+            self.assertIn(r'\InlineMath{x+y\text{。}}',tex)
+
+    def test_multiline_equation_number_stays_beside_formula(self):
+        import pymupdf
+        value = r'a = ' + ' + '.join('x_{'+str(i)+'}' for i in range(1,15)) + r' \tag{53}'
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);output=root/'number.pdf'
+            render_latex('<!-- translator-columns: 2 -->\n\n$$'+value+'$$\n\n<!-- translator-columns-end -->',root,output)
+            with pymupdf.open(output) as pdf:
+                page=pdf[0];tag=page.search_for('(53)')[0]
+                import unicodedata
+                terms=[pymupdf.Rect(span['bbox']) for block in page.get_text('dict')['blocks']
+                       for line in block.get('lines',[]) for span in line['spans']
+                       if any(c in unicodedata.normalize('NFKC',span['text']) for c in ['x','a'])]
+                self.assertTrue(terms)
+                self.assertGreaterEqual((tag.y0+tag.y1)/2,min(t.y0 for t in terms))
+                self.assertLessEqual((tag.y0+tag.y1)/2,max(t.y1 for t in terms))
+                self.assertGreater(tag.x0,max(t.x0 for t in terms))
+
+    def test_wide_radical_wraps_without_changing_terms(self):
+        value = r'\sqrt{c_0 + c_1(1 - \eta_1)^2 + c_2\eta_1^2 + 2(1 - \eta_1)c_3 + 2c_4\eta_1 + 2(1 - \eta_1)\eta_1c_5}.'
+        wrapped = latex_renderer.multiline_radical(value)
+        self.assertIn(r'\begin{gathered}', wrapped)
+        restored = wrapped.replace(r'\begin{gathered}','').replace(r'\end{gathered}','').replace(r'\\','')
+        self.assertEqual(''.join(restored.split()), ''.join(value.split()))
+        self.assertIn(r'\DisplayMathFit', latex_renderer.display_math(value))
+
+    def test_no_source_header_means_no_generated_header(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            build_project('# Section\n\nBody',root,root/'plain')
+            self.assertNotIn(r'\fancyhead[C]',(root/'plain/layout.tex').read_text('utf8'))
+            import base64
+            marker = '<!-- translator-source-header: '+base64.b64encode(b'Author / Journal 138 (2014) 17-35').decode()+' -->'
+            build_project(marker+'\n\n# Section\n\nBody',root,root/'header')
+            header = (root/'header/layout.tex').read_text('utf8')
+            self.assertIn(r'\fancyhead[C]{\scriptsize Author / Journal 138 (2014) 17-35}',header)
+            self.assertNotIn(r'\nouppercase{\leftmark}',header)
+
+    def test_twocolumn_title_note_is_visible_in_pdf(self):
+        import pymupdf
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            output = root/'notes.pdf'
+            text = 'Author[^1] and journal[^2]\n\n<!-- translator-columns: 2 -->\n\nBody text.\n\n<!-- translator-columns-end -->\n\n[^1]: Unique correspondence note.\n[^2]: Unique copyright note.'
+            render_latex(text, root, output)
+            with pymupdf.open(output) as pdf:
+                visible = ''.join(p.get_text() for p in pdf)
+            self.assertIn('Unique correspondence note.', visible)
+            self.assertIn('Unique copyright note.', visible)
+
+    def test_title_footnotes_are_outside_twocolumn_box(self):
+        source = r"\begin{document}Author\footnote{Nested {note}}Other\footnote{Second}" + '\n' + r"\typeout{TRANSLATOR-COLUMNS-BEGIN:2}Body"
+        tex = latex_renderer.apply_regions(source, 2)
+        title, body = tex.split('}]', 1)
+        self.assertNotIn(r'\footnote{', title)
+        self.assertEqual(title.count(r'\footnotemark{}'), 2)
+        self.assertIn('Nested {note}', body)
+        self.assertIn(r'\value{footnote}-1', body)
+        self.assertIn(r'\value{footnote}-0', body)
+
     def test_heading_numbering_corrects_old_markdown(self):
         with tempfile.TemporaryDirectory() as folder:
             project = Path(folder)

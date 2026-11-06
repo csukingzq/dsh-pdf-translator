@@ -9,6 +9,62 @@ from document_pipeline import assemble
 
 
 class FigureGeometryTests(unittest.TestCase):
+    def test_confirmed_truncation_blocks_output_instead_of_using_seed(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);source=root/'source.pdf'
+            with pymupdf.open() as pdf:
+                p=pdf.new_page(width=400,height=600)
+                p.draw_rect((20,20,380,580));pdf.save(source)
+            page=dict(page=1,blocks=[dict(id='p1-b1',page=1,kind='figure',
+                        bbox=[.4,.4,.6,.6],markdown='')])
+            with self.assertRaisesRegex(ValueError,'不安全旧框'):
+                assemble([page],source,root)
+            self.assertFalse((root/'crops/p1-b1.png').exists())
+            self.assertTrue(json.loads((root/'crop-report.json').read_text())['figures']['p1-b1']['unsafe'])
+
+    def test_neighbor_column_cannot_clip_mixed_vector_figure(self):
+        with pymupdf.open() as pdf:
+            p=pdf.new_page(width=400,height=600)
+            p.insert_textbox((20,250,190,490), 'Neighbor column text continues beside the figure. '*12,fontsize=8)
+            p.insert_text((210,260),'The final line of a sufficiently long paragraph above the plot.',fontsize=5)
+            p.insert_text((210,270),'has been obtained.',fontsize=5)
+            p.draw_rect((230,300,370,450))
+            pixel=pymupdf.Pixmap(pymupdf.csGRAY,pymupdf.IRect(0,0,20,20),False)
+            pixel.clear_with(128)
+            p.insert_image((260,320,280,340),stream=pixel.tobytes('png'))
+            p.insert_text((245,468),'Scattering angle',fontsize=8)
+            p.insert_text((210,500),'Fig. 2. Caption',fontsize=8)
+            result=resolve_figure_crop(p,[.52,.42,.95,.72])
+            self.assertFalse(result['diagnostics'])
+            self.assertGreater(result['bbox'][1]*600,280)
+            self.assertGreater(result['bbox'][3]*600,468)
+            self.assertLess(result['bbox'][3]*600,490)
+
+    def test_complete_bitmap_survives_small_model_box_and_neighbor_prose(self):
+        with pymupdf.open() as pdf:
+            p=pdf.new_page(width=400,height=600)
+            pix=pymupdf.Pixmap(pymupdf.csGRAY,pymupdf.IRect(0,0,200,200),False)
+            pix.clear_with(128)
+            p.insert_image((40,100,220,300),stream=pix.tobytes('png'),keep_proportion=False)
+            p.insert_text((240,190),'Neighboring prose outside the image must not veto the complete object.',fontsize=8)
+            p.insert_text((40,320),'Fig. 1. Complete image caption',fontsize=9)
+            result=resolve_figure_crop(p,[.15,.20,.5,.45])
+            self.assertEqual(result['decision'],'complete_native_image')
+            b=result['bbox']
+            self.assertLessEqual(b[0]*400,40)
+            self.assertGreaterEqual(b[3]*600,300)
+            self.assertLess(b[3]*600,310)
+
+    def test_two_equal_images_are_not_arbitrarily_selected(self):
+        with pymupdf.open() as pdf:
+            p=pdf.new_page(width=400,height=600)
+            pix=pymupdf.Pixmap(pymupdf.csGRAY,pymupdf.IRect(0,0,100,100),False)
+            pix.clear_with(128)
+            for box in [(40,100,180,240),(200,100,340,240)]:
+                p.insert_image(box,stream=pix.tobytes('png'))
+            result=resolve_figure_crop(p,[.1,.17,.85,.4])
+            self.assertNotEqual(result['decision'],'complete_native_image')
+
     def test_cut_frame_and_labels_recovered_without_caption_or_body(self):
         with pymupdf.open() as pdf:
             p=pdf.new_page(width=400,height=600)

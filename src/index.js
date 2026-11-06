@@ -63,7 +63,7 @@ export function apply(ctx, config = {}) {
       cursor:{type:'integer'},limit:{type:'integer'},reason:string,recomputeStructure:{type:'boolean'},
       blockEdits:{type:'array',items:{type:'object',properties:{id:string,markdown:string,note_override:{type:'object',properties:{anchors:{type:'array',items:string,required:true}},additionalProperties:false},structure_override:{type:'object',properties:{},additionalProperties:true}},additionalProperties:false}},
       page:{type:'integer'},target:{...string,enum:['source','output']},pages:{type:'array',items:{type:'object',properties:{},additionalProperties:true}},
-      layout:{type:'object',properties:{figureMaxWidth:{type:'number',description:'图最大宽度/正文宽度，0.3–1，默认 0.85'},figureMaxHeight:{type:'number',description:'图最大高度/正文高度，0.15–0.65，默认 0.25；小图可尝试 0.45'},fontSize:{type:'integer',description:'正文和表格字号，9–14pt，默认 11'},columns:{type:'integer',description:'栏数，0=自动识别原 PDF 并保留双栏/多栏（默认），1/2/3=强制栏数'}},additionalProperties:false},
+      layout:{type:'object',properties:{figureMaxWidth:{type:'number',description:'图最大宽度/正文宽度，0.3–1，默认 1'},figureMaxHeight:{type:'number',description:'图最大高度/正文高度，0.15–0.65，默认 0.55；保留显式自定义限制'},fontSize:{type:'integer',description:'正文和表格字号，9–14pt，默认 11'},columns:{type:'integer',description:'栏数，0=保留原文栏数（默认），1/2/3=指定栏数'}},additionalProperties:false},
       summary:string,remaining:{type:'array',items:string}},
     output:{schema:{type:'object',properties:{},additionalProperties:true},render:(_args,value)=>{
       const {attachment,...info}=value;

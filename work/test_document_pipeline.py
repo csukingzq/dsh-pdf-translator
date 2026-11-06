@@ -16,6 +16,41 @@ from document_pipeline import (page_indices, validate, assemble, block_markdown,
 
 
 class StructuredPipelineTests(unittest.TestCase):
+    def test_split_table_caption_is_bound_as_group(self):
+        from document_pipeline import bind_captions
+        blocks = [dict(id='label', kind='paragraph', markdown='表1', bbox=[.07,.07,.13,.08]),
+                  dict(id='description', kind='paragraph', markdown='散射矩阵数值', bbox=[.07,.085,.93,.11]),
+                  dict(id='table', kind='table', markdown='<table></table>', bbox=[.07,.12,.93,.59])]
+        bound = bind_captions([{'blocks':blocks}])
+        self.assertEqual(bound['table'][1]['caption_ids'], ['label','description'])
+        self.assertIn('散射矩阵数值', bound['table'][1]['markdown'])
+        self.assertEqual(blocks[0]['markdown'], '表1')
+        from document_pipeline import _is_caption
+        self.assertFalse(_is_caption(dict(kind='paragraph',markdown='表1展示了本方法的结果。')))
+
+    def test_default_output_preserves_source_columns(self):
+        from document_pipeline import reading_grid
+        with tempfile.TemporaryDirectory() as folder:
+            with patch('document_pipeline.column_layout.grid_for', return_value={'columns':1}) as grid:
+                reading_grid([], 'source.pdf', Path(folder))
+                self.assertEqual(grid.call_args.args[-1], 0)
+
+    def test_formula_and_uncertain_blocks_cannot_be_image_fallbacks(self):
+        for kind, text in [('equation','$$x=1$$'),('paragraph','Text $x$'),('uncertain','')]:
+            with self.assertRaisesRegex(ValueError,'禁止'):
+                block_markdown(dict(id='p1-b1',page=1,kind=kind,markdown=text,
+                                    bbox=[.1,.1,.9,.3],status='source_image'),None,Path('.'))
+
+    def test_source_header_keeps_original_words_not_chapter_title(self):
+        import base64
+        headers=[dict(id=f'h{i}',page=i,kind='paragraph',bbox=[.1,0,.9,.05],markdown='译文',
+                      source_text=('18    ' if i==2 else '')+'Author / Journal 138 (2014) 17–35',
+                      role='running_header',excluded=True) for i in [2,3]]
+        pages=[dict(page=h['page'],blocks=[h]) for h in headers]
+        with tempfile.TemporaryDirectory() as folder:
+            text=assemble(pages,None,Path(folder))
+        self.assertIn(base64.b64encode('Author / Journal 138 (2014) 17–35'.encode()).decode(),text)
+
     def setUp(self):
         guide = patch('document_pipeline.coordinate_reference', return_value=b'guide')
         guide.start()
@@ -128,6 +163,7 @@ class StructuredPipelineTests(unittest.TestCase):
         # which left a hole in the column and pushed it away from its text.
         with tempfile.TemporaryDirectory() as folder:
             path = self.two_column_pdf(Path(folder)/'two.pdf')
+            (Path(folder)/'layout.json').write_text('{"columns":2}', 'utf-8')
             narrow = dict(kind='table', bbox=[0.53, 0.2, 0.9, 0.3],
                           markdown='| A | B |\n|---|---|\n| 1 | 2 |', page=1, id='p1-b2')
             wide = dict(kind='table', bbox=[0.08, 0.6, 0.9, 0.7],
@@ -173,6 +209,7 @@ class StructuredPipelineTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as folder:
             path=self.two_column_pdf(Path(folder)/'two.pdf')
+            (Path(folder)/'layout.json').write_text('{"columns":2}', 'utf-8')
             title=self.block('通栏标题'); title['bbox']=[0.2,0.05,0.8,0.09]
             left=self.block('左栏正文'); left['bbox']=[0.08,0.2,0.47,0.5]; left['id']='p1-b2'
             right=self.block('右栏正文'); right['bbox']=[0.51,0.2,0.91,0.5]; right['id']='p1-b3'

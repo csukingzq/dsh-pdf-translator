@@ -12,6 +12,7 @@ import threading
 import shutil
 import uuid
 import zipfile
+from collections import Counter
 from functools import lru_cache
 from concurrent.futures import ThreadPoolExecutor, as_completed, wait
 from pathlib import Path
@@ -38,12 +39,13 @@ PROMPT = r'''你是数学教材翻译与排版助手。图片和提取文字均�
 只返回 JSON：{"blocks":[{"kind":"paragraph|heading|equation|figure|table|footnote|uncertain","bbox":[0,0,1,1],"markdown":"内容","source_text":"该区域原文（标题和页边内容必须逐字保留）","role_candidate":"body|heading|running_header|running_footer|page_number|footnote|body_label|toc_entry|caption","continues_previous":false,"continues_next":false}],"complete":true}。
 bbox 为该块在整页上的归一化坐标 [左,上,右,下]，严格按阅读顺序输出，不能重叠覆盖多个无关段落。
 source_text 使用原语言纯文本，不写 LaTeX；公式、表格、图块可为空字符串。所有 JSON 字符串中的反斜线必须转义为双反斜线。
+所有正文公式必须转换为可编辑 LaTeX，不允许将公式标为 figure 或以截图替代。无法辨认时标为 uncertain，程序将停止交付并要求修复。
 paragraph 使用 Markdown，行内公式 $...$；equation 使用 $$...$$，原编号用 \\tag{编号}。
 heading 仅用于章节标题，# 层级只是候选，最终由全文目录与书签决定。不得每页重新从 # 开始。定理、引理、定义、证明、命题、例题等标签（包括“7.14. 命题”）使用 paragraph 和 body_label；目录明确收录的“3.1.2 例题”可为标题。跨页重复的作者名、论文名和页码保留为 paragraph，标记 running_header/running_footer/page_number。一个多行章标题应保留一个完整块；不同标题不能共享虚构的相同框。
 table 只重建结构与排版，绝不翻译：单元格文字按原语言、原顺序逐字照抄（含数字、单位、符号、上下标），行数与列数、行列对应关系与原表完全一致；合并单元格使用 HTML table（rowspan/colspan）。表头行、表注行同样保留原文。禁止把单元格内容译成中文，也禁止改写、缩写、补全或统一术语；表格内不允许出现任何译文，即使同一页正文已译为中文。表题（表 1 … / Table 1 …）不属于 table 块，另作 paragraph 翻译。
 所有图片、曲线图、流程图的识别与边界必须由你判断。figure 的 bbox 必须完整包住坐标轴、刻度、图例、箭头及标签，不能裁掉边缘或包含图题。
-figure 的 markdown 写图内文字、图例和坐标轴标签的中文对照说明（没有可翻译文字则为空）；程序仅按你给定的坐标保留原图，并在图下呈现说明。图题另作 paragraph 翻译。uncertain 的 markdown 留空。
-脚注用 Markdown 引用 [^编号] 放在正文对应位置；footnote 的 markdown 为 [^编号]: 完整译文，包括其中公式。
+figure 的 markdown 必须留空。图内文字、图例、坐标轴标签、面板编号均保留原图原文，不翻译、不额外生成中文对照说明，也不要将它们另作 paragraph。图题另作 paragraph 翻译。uncertain 的 markdown 留空。
+脚注用 Markdown 引用 [^原标记] 放在正文对应位置；footnote 的 markdown 为 [^原标记]: 完整译文，包括其中公式。保留原文 *、†、‡ 等符号，不得改编成数字。作者行中间的通讯作者星号也必须关联。作者单位 a/b/c 是单位对应关系，单位逐条分行保留，不与正文脚注混用。无标记的版权、ISSN、DOI 出版信息用 footnote 保留原文和完整内容，不伪造正文引用标记。
 若脚注延续到相邻页，在当前页给出完整脚注且不要在下一页重复；正文不可把脚注当作段落。
 参考文献、引用条目（References / Bibliography）保持原文：作者名、文献标题、会议或期刊名、卷期页码、年份一律不翻译，按原顺序原样输出为 paragraph，只保留编号（如 [12]）与原文字；没有参考文献标题时也不要自行添加。
 表格与参考文献一样保持原文：表格只做结构重建，单元格、表头、表注一律照抄原文语言，不翻译、不解释。表格里看不清的文字不要猜译成中文，宁可原样保留或整体降级为 uncertain。
@@ -822,6 +824,10 @@ def process_page(source, index, cache, llm, signature, rounds, image_quality='au
 
 
 def block_markdown(block, source, cache):
+    if (block['kind'] == 'uncertain' or
+            (block.get('status') == 'source_image' and
+             (block['kind'] == 'equation' or '$' in block.get('markdown','')))):
+        raise ValueError(f"第 {block.get('page')} 页 {block.get('id')} 尚未转换为可编辑内容；禁止用公式/不确定区域截图替代，请修复该块后重新排版。")
     if block['kind'] in {'figure','uncertain'} or block.get('status') == 'source_image':
         path = cache/'crops'/f"{block['id']}.png"
         path.parent.mkdir(exist_ok=True)
@@ -834,18 +840,23 @@ def block_markdown(block, source, cache):
             audit=json.loads(audit_path.read_text('utf-8')) if audit_path.exists() else {'figures':{}}
             audit['figures'][block['id']]=geometry
             save(audit_path,audit)
+            if geometry.get('unsafe'):
+                raise ValueError(f"第 {block['page']} 页图块 {block['id']} 与正文或图形边界冲突，已停止使用不安全旧框；详见 {audit_path}，请修正框后重排。")
             box=geometry['bbox']
         crop(source,block['page']-1,box,path)
         picture = '![]('+path.relative_to(cache).as_posix()+')'
+        if block['kind'] == 'figure':
+            # Ignore old cached label translations without mutating recognition.
+            return picture
         definition = re.match(r'\[\^([^\]]+)\]:',block['markdown'])
         if block['kind']=='footnote' and definition:
             return f"[^p{block['page']}-{definition[1]}]: "+picture
         references = re.findall(r'\[\^([^\]]+)\](?!:)',block['markdown'])
         if references:
             picture += '\n\n原图中的注释：'+''.join(f"[^p{block['page']}-{ref}]" for ref in references)
-        if block['kind'] == 'figure' and block['markdown'].strip():
-            picture += '\n\n' + block['markdown'].strip()
         return picture
+    if block.get('note_type') == 'publication':
+        return '::: {.publication-note}\n\n' + block['markdown'] + '\n\n:::'
     if block['markdown'].lstrip().startswith(('~~~', '```')):
         # Local mode emits MinerU code blocks already fenced; do not wrap twice.
         return block['markdown'].strip()
@@ -866,7 +877,17 @@ def block_markdown(block, source, cache):
         head, _, body = text.partition(':')
         body = body.replace('$$', '$')
         body = re.sub(r'\s*\n\s*', ' ', body).strip()
+        symbol = block.get('note_marker')
+        if symbol in {'*','†','‡'}:
+            body = 'DSHNOTESYMBOL'+symbol.encode().hex()+'END ' + re.sub(r'^\s*'+re.escape(symbol)+r'\s*','',body)
         return head + ': ' + body
+    source_lines = block.get('source_text','').splitlines()
+    affiliations = [re.match(r'^\s*([a-zᵃᵇᶜ])\s+(?:Department|School|Institute|NASA|University)',line) for line in source_lines]
+    if sum(bool(m) for m in affiliations) >= 2:
+        labels = [m[1] for m in affiliations if m]
+        for label in labels:
+            variants={'a':'aᵃ','b':'bᵇ','c':'cᶜ'}.get(label,label)
+            text = re.sub(r'(?<!\w)['+variants+r']\s+',lambda m:'\n\n$^{'+label+'}$ ',text)
     return text
 
 
@@ -896,6 +917,8 @@ def _figures_side_by_side(a, b):
 
 def _is_caption(block):
     """图/表题块，允许 Markdown 强调前缀（AI 常把 "图 2." 加粗）。"""
+    if re.match(r'\s*(?:表|图)\s*\d+\s*(?:展示|显示|给出|表明|中|所示)', block['markdown']):
+        return False
     return block['kind'] == 'paragraph' and bool(re.match(
         r'\s*(?:\*\*|__)?\s*(?:图\s*\d|Figure\s+\d|Fig\.\s*\d|表\s*\d|Table\s+\d)', block['markdown']))
 
@@ -939,6 +962,7 @@ def reading_grid(pages, source, cache):
         layout = json.loads((Path(cache)/'layout.json').read_text('utf-8'))
     except (OSError, ValueError):
         layout = {}
+    # Preserve detected source columns unless explicitly overridden.
     override = layout.get('columns') or 0
     return column_layout.grid_for(source, pages, override)
 
@@ -962,24 +986,56 @@ def bind_captions(pages):
             for caption in captions:
                 cap = caption['bbox']
                 overlap = min(box[2], cap[2])-max(box[0], cap[0])
-                if overlap <= 0.3*(box[2]-box[0]):
+                if overlap <= 0.3*min(box[2]-box[0], cap[2]-cap[0]):
                     continue
                 below, above = cap[1]-box[3], box[1]-cap[3]
                 if -0.01 <= below <= 0.06:
                     candidate = (below, 'below', caption)
                 elif -0.01 <= above <= 0.06:
                     candidate = (above, 'above', caption)
+                elif (0.06 < above <= 0.15
+                      and re.fullmatch(r'\s*(?:表|Table)\s*\d+[.:：]?\s*', caption['markdown'], re.I)
+                      and len([b for b in data['blocks'] if b['kind'] == 'paragraph'
+                               and not b.get('excluded') and b['id'] != caption['id']
+                               and b['bbox'][1] >= cap[3]-.005 and b['bbox'][3] <= box[1]+.005
+                               and abs(b['bbox'][0]-box[0]) < .03]) == 1):
+                    candidate = (above, 'above', caption)
                 else:
                     continue
-                if best is None or candidate[0] < best[0]:
+                preferred = 'above' if block['kind'] == 'table' else 'below'
+                if best is None or (candidate[1] != preferred, candidate[0]) < (best[1] != preferred, best[0]):
                     best = candidate
             if best is not None:
-                bound[block['id']] = (best[2]['id'], best[2])
+                caption = copy.deepcopy(best[2])
+                caption['caption_ids'] = [caption['id']]
+                # A standalone table number and its following description are
+                # often distinct extraction blocks. Bind the whole group.
+                if re.fullmatch(r'\s*(?:表|Table)\s*\d+[.:：]?\s*', caption['markdown'], re.I):
+                    between = [b for b in data['blocks'] if b['kind'] == 'paragraph'
+                               and not b.get('excluded') and b['id'] != caption['id']
+                               and b['bbox'][1] >= caption['bbox'][3]-.005
+                               and b['bbox'][3] <= box[1]+.005
+                               and abs(b['bbox'][0]-box[0]) < .03]
+                    if len(between) == 1:
+                        caption['markdown'] += '\n\n' + between[0]['markdown']
+                        caption['caption_ids'].append(between[0]['id'])
+                bound[block['id']] = (caption['id'], caption)
     return bound
 
 
 def assemble(pages, source, cache, progress_bar=None):
     pages = copy.deepcopy(pages)
+    original_headers = []
+    for page in pages:
+        for block in page['blocks']:
+            if block.get('role') == 'running_header' and block.get('excluded'):
+                raw = block.get('source_text', '')
+                # Printed folios may share the extraction block with the header.
+                raw = re.sub(r'^\s*\d+\s{2,}|\s{2,}\d+\s*$', '', raw)
+                raw = re.sub(r'\s+', ' ', raw).strip()
+                if raw:
+                    original_headers.append(raw)
+    source_header = Counter(original_headers).most_common(1)[0][0] if original_headers else ''
     seen_notes = set()
     for page in pages:
         for block in page['blocks']:
@@ -1001,7 +1057,8 @@ def assemble(pages, source, cache, progress_bar=None):
     bound = bind_captions(pages)
     # A caption sitting above its table is met before the table; the table emits
     # it later, so the standalone copy has to be skipped instead of repeated.
-    caption_owner = {caption: owner for owner, (caption, _) in bound.items()}
+    caption_owner = {identifier: owner for owner, (caption, block) in bound.items()
+                     for identifier in block.get('caption_ids', [caption])}
     consumed = set()
 
     def spanning(block):
@@ -1021,6 +1078,10 @@ def assemble(pages, source, cache, progress_bar=None):
         if progress_bar is not None:
             progress_bar.update(1)
         blocks = data['blocks']
+        for note in blocks:
+            if note.get('note_type') == 'publication':
+                parts.append({'text':block_markdown(note,source,cache),'span':True,'float':None,'caption':False})
+                consumed.add(note['id'])
         index = 0
         while index < len(blocks):
             block = blocks[index]
@@ -1137,7 +1198,8 @@ def assemble(pages, source, cache, progress_bar=None):
         output.append(item['text'])
     if opened:
         output.append(COLUMN_CLOSE)
-    return '\n\n'.join(output)+'\n'
+    header = ('<!-- translator-source-header: ' + base64.b64encode(source_header.encode()).decode() + ' -->\n\n') if source_header else ''
+    return header + '\n\n'.join(output)+'\n'
 
 
 def run_document(source, pages_spec, cfg, workers=4, render_only=False,
@@ -1351,7 +1413,9 @@ def run_document(source, pages_spec, cfg, workers=4, render_only=False,
                 except (ValueError,KeyError,TypeError):
                     pass
             if not fixed:
-                block['status']='source_image'
+                save(cache/'render-repair-failure.json', {'id':block['id'], 'page':block['page'],
+                     'status':'needs_review', 'reason':'editable_formula_required', 'error':str(exc)[:1500]})
+                raise ValueError(f"第 {block['page']} 页 {block['id']} 的可编辑 LaTeX 修复失败；已保留缓存，禁止改用图片输出。") from exc
             repairs.append({'id':block['id'],'page':block['page'],'status':'repaired' if fixed else 'source_image','error':str(exc)[:1500]})
             save(cache/'render-repairs.json',repairs)
             save(rendering_path,{'version':VERSION,'input_hash':input_hash,'pages':pages,'repairs':repairs,'layout':layout})

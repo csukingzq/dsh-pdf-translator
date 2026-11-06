@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pymupdf
 
-STRUCTURE_VERSION = 'document-structure-v3'
+STRUCTURE_VERSION = 'document-structure-v4'
 # Evidence format changes independently: resolver upgrades must not buy the
 # same vision observations again. The initial format shares the v1 identifier.
 SOURCE_EVIDENCE_VERSION = 'document-structure-v1'

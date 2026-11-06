@@ -50,11 +50,17 @@ class PanelPipelineTests(unittest.TestCase):
 
     def test_run_folder_ships_only_pdf_and_compilable_latex_archive(self):
         cfg={'model':'test','base_url':'https://example.invalid','api_key':'unused'}
-        data={'complete':True,'blocks':[{'kind':'figure','bbox':[.1,.2,.8,.7],'markdown':'x：时间'}]}
+        data={'complete':True,'blocks':[{'kind':'figure','bbox':[.2,.2,.8,.65],'markdown':''}]}
         with tempfile.TemporaryDirectory() as folder, patch.object(pipeline,'request_page',return_value=data):
             root=Path(folder);events=[]
-            first=pipeline.run_document(FIXTURES/'vision-sample.pdf','all',cfg,data_dir=root,output_dir=root/'自选目录',on_progress=events.append)
-            second=pipeline.run_document(FIXTURES/'vision-sample.pdf','all',cfg,data_dir=root,output_dir=root/'自选目录',on_progress=events.append)
+            # Packaging test uses an actual isolated chart, not a box covering prose.
+            source=root/'chart.pdf'
+            with pymupdf.open() as pdf:
+                page=pdf.new_page(width=400,height=600)
+                page.draw_rect((100,150,300,350))
+                pdf.save(source)
+            first=pipeline.run_document(source,'all',cfg,data_dir=root,output_dir=root/'自选目录',on_progress=events.append)
+            second=pipeline.run_document(source,'all',cfg,data_dir=root,output_dir=root/'自选目录',on_progress=events.append)
             self.assertNotEqual(Path(first['output']).parent,Path(second['output']).parent)
             self.assertEqual(events[-1]['completed'],1);self.assertEqual(events[-1]['cached'],1)
             run_dir=Path(second['output']).parent

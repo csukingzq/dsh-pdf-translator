@@ -22,6 +22,20 @@ def document(*blocks):
 
 
 class SemanticTests(unittest.TestCase):
+    def test_author_star_and_unmarked_publication_note(self):
+        pages=document(block('authors','Lei Bi a, Ping Yang a,*, George W. Kattawar b, Michael I. Mishchenko c'),
+                       block('correspondence','[^1]: 通讯地址：University','footnote'),
+                       block('publication','[^2]: 版权与 DOI','footnote'))
+        pages[0]['blocks'][1]['source_text']='*Correspondence to: University'
+        pages[0]['blocks'][2]['source_text']='0022-4073/$ © 2012 Elsevier. http://dx.doi.org/example'
+        notes, diagnostics=bind_notes(pages)
+        self.assertFalse(diagnostics)
+        self.assertEqual(notes[0]['anchors'],['authors'])
+        self.assertEqual(notes[0]['marker'],'*')
+        self.assertEqual(pages[0]['blocks'][2]['note_type'],'publication')
+        self.assertNotIn('publication]',pages[0]['blocks'][0]['markdown'])
+        self.assertIn('a,[^note-correspondence], George',pages[0]['blocks'][0]['markdown'])
+
     def test_superscript_and_math_legacy_notes_are_restored(self):
         raw = document(block('p1-b1', '正文¹ 和 Hilbert$^2$'),
                        block('p1-b2', '注释一', role='footnote'),
@@ -86,6 +100,26 @@ class SemanticTests(unittest.TestCase):
         self.assertEqual(len(calls),3)
         self.assertEqual(result['pages'][0]['blocks'][0]['markdown'],'Source $x$')
         self.assertEqual(result['diagnostics'][0]['reason'],'translation_failed')
+
+    def test_author_names_are_not_failed_translation(self):
+        from semantic_document import is_author_list
+        self.assertTrue(is_author_list('Lei Bi a, Ping Yang a,*, George W. Kattawar b, Michael I. Mishchenko c'))
+        self.assertTrue(is_author_list('Lei Bi a, Ping Yang a,*'))
+        self.assertFalse(is_author_list('The first result, the second result, and the final result are discussed.'))
+
+    def test_failed_unit_does_not_discard_valid_neighbor(self):
+        pages = resolve_document_structure(document(block('a','Source $x$'),
+                    block('b','Other $y$')), {})['pages']
+        calls = []
+        def request(payload, error):
+            calls.append(error)
+            return {'units':[dict(id=u['id'], text=('译文 '+u['text']) if u['id'].startswith('a:') else 'broken')
+                             for u in payload['units']]}
+        with tempfile.TemporaryDirectory() as folder:
+            result = translate_document(pages, [], folder, {}, request)
+        self.assertEqual(len(calls), 3)
+        self.assertIn('译文', result['pages'][0]['blocks'][0]['markdown'])
+        self.assertEqual([d['block'] for d in result['diagnostics']], ['b'])
 
     def test_duplicate_marker_is_not_guessed(self):
         pages=document(block('p1-b1','正文¹'),block('p1-b2','[^1]: 一','footnote'),
