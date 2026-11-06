@@ -1,0 +1,244 @@
+{
+  "description": "Minimal structure-only observations from the supplied book; no page images or body transcription.",
+  "index": {
+    "nodes": [
+      {
+        "id": "outline-3",
+        "title": "Chapter I. Hilbert Spaces",
+        "page": 18,
+        "level": 1,
+        "parent_id": null,
+        "evidence": "bookmark",
+        "printed_page": "",
+        "toc_title": "CHAPTER I Hilbert Spaces"
+      },
+      {
+        "id": "outline-4",
+        "title": "§1. Elementary Properties and Examples",
+        "page": 18,
+        "level": 2,
+        "parent_id": "outline-3",
+        "evidence": "bookmark",
+        "printed_page": "1",
+        "toc_title": "§1. Elementary Properties and Examples"
+      },
+      {
+        "id": "outline-5",
+        "title": "§2. Orthogonality",
+        "page": 24,
+        "level": 2,
+        "parent_id": "outline-3",
+        "evidence": "bookmark",
+        "printed_page": "7",
+        "toc_title": "§2. Orthogonality"
+      }
+    ],
+    "pages": {
+      "18": {
+        "regions": [
+          {
+            "source_text": "CHAPTER I",
+            "bbox": [
+              0.06,
+              0.09,
+              0.2,
+              0.12
+            ],
+            "role": "heading"
+          },
+          {
+            "source_text": "Hilbert Spaces",
+            "bbox": [
+              0.06,
+              0.14,
+              0.34,
+              0.18
+            ],
+            "role": "heading"
+          },
+          {
+            "source_text": "§1. Elementary Properties and Examples",
+            "bbox": [
+              0.06,
+              0.61,
+              0.58,
+              0.65
+            ],
+            "role": "heading"
+          },
+          {
+            "source_text": "1.1. Definition.",
+            "bbox": [
+              0.06,
+              0.72,
+              0.22,
+              0.74
+            ],
+            "role": "body_label"
+          }
+        ]
+      },
+      "24": {
+        "regions": [
+          {
+            "source_text": "§2. Orthogonality",
+            "bbox": [
+              0.06,
+              0.05,
+              0.24,
+              0.07
+            ],
+            "role": "running_header"
+          },
+          {
+            "source_text": "7",
+            "bbox": [
+              0.9,
+              0.05,
+              0.92,
+              0.07
+            ],
+            "role": "page_number"
+          },
+          {
+            "source_text": "§2. Orthogonality",
+            "bbox": [
+              0.06,
+              0.6,
+              0.28,
+              0.63
+            ],
+            "role": "heading"
+          },
+          {
+            "source_text": "2.1. Definition.",
+            "bbox": [
+              0.06,
+              0.7,
+              0.21,
+              0.72
+            ],
+            "role": "body_label"
+          },
+          {
+            "source_text": "2.2. The Pythagorean Theorem.",
+            "bbox": [
+              0.06,
+              0.85,
+              0.31,
+              0.87
+            ],
+            "role": "body_label"
+          }
+        ]
+      }
+    },
+    "diagnostics": []
+  },
+  "pages": [
+    {
+      "page": 18,
+      "recognition_schema": 2,
+      "complete": true,
+      "blocks": [
+        {
+          "id": "p18-b1",
+          "page": 18,
+          "kind": "heading",
+          "bbox": [
+            0.03,
+            0.09,
+            0.3,
+            0.12
+          ],
+          "markdown": "# 第一章",
+          "source_text": "CHAPTER I",
+          "role_candidate": "heading",
+          "status": "translated"
+        },
+        {
+          "id": "p18-b2",
+          "page": 18,
+          "kind": "heading",
+          "bbox": [
+            0.03,
+            0.13,
+            0.42,
+            0.17
+          ],
+          "markdown": "# 希尔伯特空间",
+          "source_text": "Hilbert Spaces",
+          "role_candidate": "heading",
+          "status": "translated"
+        },
+        {
+          "id": "p18-b4",
+          "page": 18,
+          "kind": "heading",
+          "bbox": [
+            0.03,
+            0.64,
+            0.68,
+            0.68
+          ],
+          "markdown": "## §1. 基本性质与例子",
+          "source_text": "§1. Elementary Properties and Examples",
+          "role_candidate": "heading",
+          "status": "translated"
+        }
+      ]
+    },
+    {
+      "page": 24,
+      "recognition_schema": 2,
+      "complete": true,
+      "blocks": [
+        {
+          "id": "p24-b1",
+          "page": 24,
+          "kind": "paragraph",
+          "bbox": [
+            0.06,
+            0.03,
+            0.3,
+            0.055
+          ],
+          "markdown": "§2. 正交性",
+          "source_text": "§2. Orthogonality",
+          "role_candidate": "running_header",
+          "status": "translated"
+        },
+        {
+          "id": "p24-b2",
+          "page": 24,
+          "kind": "paragraph",
+          "bbox": [
+            0.84,
+            0.03,
+            0.88,
+            0.055
+          ],
+          "markdown": "7",
+          "source_text": "7",
+          "role_candidate": "page_number",
+          "status": "translated"
+        },
+        {
+          "id": "p24-b15",
+          "page": 24,
+          "kind": "heading",
+          "bbox": [
+            0.06,
+            0.69,
+            0.42,
+            0.73
+          ],
+          "markdown": "## §2. 正交性",
+          "source_text": "§2. Orthogonality",
+          "role_candidate": "heading",
+          "status": "translated"
+        }
+      ]
+    }
+  ]
+}

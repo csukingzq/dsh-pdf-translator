@@ -29,7 +29,7 @@ class ReviewTests(unittest.TestCase):
         self.cache = self.root/'work'/'document-cache'/'abc'/'model'
         self.cache.mkdir(parents=True)
         self.markdown = self.cache/'translated.md'
-        self.page = {'page':1,'complete':True,'blocks':[{'page':1,'id':'p1-b1','kind':'paragraph','bbox':[0,0,1,1],'markdown':'原始译文','status':'translated'}]}
+        self.page = {'page':1,'complete':True,'recognition_schema':2,'blocks':[{'page':1,'id':'p1-b1','kind':'paragraph','bbox':[0,0,1,1],'markdown':'原始译文','status':'translated'}]}
         doc = {'version':1,'pages':[self.page]}
         for target in [self.task/'document.json',self.cache/'rendering.json',self.cache/'document.json',self.cache/'final-pages.json']:
             review.save(target,doc)
@@ -67,7 +67,8 @@ class ReviewTests(unittest.TestCase):
             result = self.invoke('apply',expectedVersion=version,pages=[revised])
         self.assertNotEqual(result['version'],version)
         for target in [self.result['document'],self.result['canonical_document'],self.cache/'document.json',self.cache/'final-pages.json']:
-            self.assertEqual(review.read(target)['pages'][0],revised)
+            self.assertEqual(review.read(target)['pages'][0]['blocks'][0]['markdown'],revised['blocks'][0]['markdown'])
+            self.assertEqual(review.read(target)['pages'],review.read(self.result['document'])['pages'])
         self.assertIn('修订译文',Path(self.result['markdown']).read_text('utf-8'))
         self.assertIn('修订译文',self.archive_text('main.tex'))
         self.assertEqual(sorted(p.name for p in self.folder.iterdir()),sorted([self.output.name,self.archive.name]))
@@ -133,6 +134,30 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual(result['result']['status'],'needs_review')
         self.assertEqual(review.read(self.result['report'])['ai_review']['remaining'],['表格待确认'])
 
+    def test_structure_override_survives_layout_revision_and_can_be_cleared(self):
+        revised=copy.deepcopy(self.page)
+        revised['blocks'][0]['structure_override']={'role':'heading','heading_level':2}
+        with patch.object(review,'render_latex',self.render):
+            self.invoke('apply',pages=[revised])
+            self.invoke('apply',layout={'fontSize':12})
+            accepted=review.read(self.result['document'])['pages'][0]
+            self.assertEqual(accepted['blocks'][0]['heading_level'],2)
+            self.assertIn('## 原始译文',self.markdown.read_text('utf-8'))
+            accepted['blocks'][0]['structure_override']=None
+            self.invoke('apply',pages=[accepted])
+        block=review.read(self.result['document'])['pages'][0]['blocks'][0]
+        self.assertEqual(block['role'],'body')
+        self.assertNotIn('structure_override',block)
+        self.assertNotIn('## ',self.markdown.read_text('utf-8'))
+
+    def test_invalid_structure_override_cannot_publish(self):
+        before=self.snapshot()
+        revised=copy.deepcopy(self.page)
+        revised['blocks'][0]['structure_override']={'role':'heading','heading_level':True}
+        with self.assertRaisesRegex(ValueError,'heading_level'):
+            self.invoke('apply',pages=[revised])
+        self.assertEqual(before,self.snapshot())
+
     def test_real_compiler_accepts_revision(self):
         revised=copy.deepcopy(self.page);revised['blocks'][0]['markdown']='修订后的中文段落，含公式 $a+b=c$。'
         result=self.invoke('apply',pages=[revised],layout={'fontSize':12,'figureMaxHeight':.45})
@@ -149,7 +174,7 @@ class ReviewTests(unittest.TestCase):
         with patch.object(review,'render_latex',self.render):
             result=self.invoke('apply',layout={'figureMaxHeight':.45,'figureMaxWidth':.95})
         self.assertNotEqual(result['version'],version)
-        self.assertEqual(review.read(self.result['document'])['pages'],[self.page])
+        self.assertEqual(review.read(self.result['document'])['pages'][0]['blocks'][0]['markdown'],self.page['blocks'][0]['markdown'])
         for target in [self.cache/'layout.json']:
             self.assertEqual(review.read(target),{'figureMaxHeight':.45,'figureMaxWidth':.95})
         self.assertEqual(review.read(self.result['canonical_document'])['layout']['figureMaxHeight'],.45)

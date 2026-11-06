@@ -7,11 +7,11 @@ import pymupdf
 from pathlib import Path
 from document_pipeline import (page_indices, validate, assemble, block_markdown,
                                page_quality, render_page, record_usage, take_usage, request_page,
-                               split_heading_blocks, normalize_notes, adjust_boxes, check_numbered_equations,
+                               normalize_notes, adjust_boxes, check_numbered_equations,
                                check_table_language, table_cells, PROMPT,
                                pages_hash, save_final_pages, load_final_pages, thinking_enabled,
-                               run_document, drop_running_headers, merge_adjacent_headings,
-                               merge_bottom_notes, drop_page_footers, api,
+                               run_document,
+                               merge_bottom_notes, api,
                                untranslated_pages, references_start, process_page)
 
 
@@ -260,12 +260,6 @@ class StructuredPipelineTests(unittest.TestCase):
         self.assertNotIn('max_tokens',call.call_args_list[1].kwargs['payload'])
         self.assertTrue(data['complete'])
 
-    def test_merged_headings_are_split(self):
-        data = {'complete':True,'blocks':[{'kind':'heading','bbox':[.1,.1,.9,.2],
-                'markdown':'# 第 7 章\n## 常微分方程','continues_previous':False,'continues_next':False}]}
-        blocks = split_heading_blocks(data)['blocks']
-        self.assertEqual([b['markdown'] for b in blocks],['# 第 7 章','## 常微分方程'])
-        self.assertEqual({b['bbox'][0] for b in blocks},{.1})
 
     def test_dropped_equation_number_is_attached_from_layout(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -317,12 +311,6 @@ class StructuredPipelineTests(unittest.TestCase):
         self.assertIn('单位 A',page['blocks'][2]['markdown'])
         self.assertIn('版权所有',page['blocks'][3]['markdown'])
 
-    def test_copyright_footer_is_dropped_from_body(self):
-        pages = [{'page':1,'blocks':[
-            {'kind':'paragraph','bbox':[.1,.2,.9,.3],'markdown':'正文'},
-            {'kind':'paragraph','bbox':[.1,.95,.9,.97],'markdown':'版权所有 © 由 SIAM 持有。'}]}]
-        drop_page_footers(pages)
-        self.assertEqual(len(pages[0]['blocks']),1)
 
     def test_unmarked_bottom_note_becomes_page_note(self):
         page = {'page':2,'blocks':[
@@ -368,41 +356,6 @@ class StructuredPipelineTests(unittest.TestCase):
             self.assertIsNone(load_final_pages(cache, 'other', 'local'))
             (cache/'final-pages.json').write_text('{broken', encoding='utf-8')
             self.assertIsNone(load_final_pages(cache, fingerprint, 'local'))
-
-    def test_running_header_is_dropped_but_real_heading_kept(self):
-        with tempfile.TemporaryDirectory() as folder:
-            path = Path(folder)/'source.pdf'
-            with pymupdf.open() as doc:
-                page = doc.new_page(width=400, height=600)
-                page.insert_text((40,30),'1.2 Machine Arithmetic',fontsize=8)
-                page.insert_text((40,100),'body text '*20,fontsize=11)
-                doc.save(path)
-            pages = [{'page':1,'blocks':[
-                {'kind':'heading','bbox':[.1,.02,.6,.06],'markdown':'# 1.2 机器算术'},
-                {'kind':'paragraph','bbox':[.1,.1,.9,.3],'markdown':'正文'}]}]
-            drop_running_headers(path,pages)
-            self.assertEqual([block['kind'] for block in pages[0]['blocks']],['paragraph'])
-            plain = [{'page':1,'blocks':[
-                {'kind':'heading','bbox':[.1,.02,.6,.06],'markdown':'# 1.2 机器算术'}]}]
-            with pymupdf.open() as doc:
-                doc.new_page(width=400,height=600).insert_text((40,100),'body text '*20,fontsize=11)
-                doc.save(path)
-            drop_running_headers(path,plain)
-            self.assertEqual(len(plain[0]['blocks']),1)
-
-    def test_split_two_line_heading_is_merged(self):
-        page = {'page':2,'blocks':[
-            {'kind':'heading','page':2,'bbox':[.1,.5,.9,.56],'markdown':'### 1.2.2 误差传播：'},
-            {'kind':'heading','page':2,'bbox':[.1,.5,.9,.56],'markdown':'### 抵消误差'},
-            {'kind':'paragraph','page':2,'bbox':[.1,.6,.9,.7],'markdown':'正文'}]}
-        merge_adjacent_headings(page)
-        self.assertEqual([block['kind'] for block in page['blocks']],['heading','paragraph'])
-        self.assertEqual(page['blocks'][0]['markdown'],'### 1.2.2 误差传播：抵消误差')
-        separate = {'page':2,'blocks':[
-            {'kind':'heading','page':2,'bbox':[.1,.5,.9,.56],'markdown':'### 小节'},
-            {'kind':'heading','page':2,'bbox':[.1,.6,.9,.66],'markdown':'### 另一个'}]}
-        merge_adjacent_headings(separate)
-        self.assertEqual(len(separate['blocks']),2)
 
 
 

@@ -18,6 +18,12 @@ FIXTURES = Path(__file__).resolve().parent.parent/'tests/fixtures'
 
 
 class PanelPipelineTests(unittest.TestCase):
+    def setUp(self):
+        reader = patch.object(pipeline, 'request_structure', side_effect=lambda llm, images: {
+            'pages':[dict(page=n,is_contents=False,printed_page='',regions=[],entries=[]) for n,_ in images]})
+        self.structure_reader = reader.start()
+        self.addCleanup(reader.stop)
+
     def test_distinct_author_notes_survive_postprocessing(self):
         page={'page':1,'complete':True,'blocks':[
             {'kind':'paragraph','bbox':[.1,.1,.8,.2],'markdown':'作者甲[^1] 和作者乙[^2]'},

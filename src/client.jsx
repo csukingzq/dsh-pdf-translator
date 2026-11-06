@@ -12,7 +12,7 @@ export function createPanelState(){
   return {get:()=>value,subscribe:fn=>{listeners.add(fn);return()=>listeners.delete(fn);},
     set:patch=>{value={...value,...patch};for(const fn of listeners)fn();}};
 }
-const phaseNames={preparing:'准备',recognizing:'AI 识别与翻译',validating:'校验译文',assembling:'组装译文',compiling:'编译 PDF',exporting:'导出成果',completed:'完成'};
+const phaseNames={preparing:'准备',analyzing_structure:'分析全文结构',recognizing:'AI 识别与翻译',validating:'校验译文',assembling:'组装译文',compiling:'编译 PDF',exporting:'导出成果',completed:'完成'};
 const activeStates=new Set(['running','preparing','stopping','reviewing','repairing']);
 const fileName=p=>p?.split(/[\\/]/).pop() || '';
 const formatSize=n=>n>=1048576?(n/1048576).toFixed(1)+' MB':(n/1024).toFixed(1)+' KB';

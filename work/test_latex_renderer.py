@@ -6,7 +6,7 @@ from unittest.mock import patch
 from types import SimpleNamespace
 import latex_renderer
 from latex_renderer import build_project, safe_math, render_latex, break_long_urls, heal_glyphs, fit_tables
-from heading_structure import normalize_headings
+from document_structure import resolve_document_structure
 
 
 class LatexRendererTests(unittest.TestCase):
@@ -14,8 +14,8 @@ class LatexRendererTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             project = Path(folder)
             titles = ['# 第3章 积分', '# 3.2 积分', '## 3.2.1 梯形法', '### 3.2 节', '# 3(c) 的图（N=50）']
-            pages = [{'blocks': [{'kind':'heading','markdown':title} for title in titles]}]
-            normalize_headings(pages)
+            pages = [{'page':1, 'blocks': [{'kind':'heading','markdown':title, 'bbox':[.1,.2,.9,.25]} for title in titles]}]
+            pages = resolve_document_structure(pages, {})['pages']
             build_project('\n\n'.join(b['markdown'] for b in pages[0]['blocks']), project, project)
             tex = (project/'main.tex').read_text('utf-8')
             self.assertIn(r'\subsection{3.2 积分}', tex)

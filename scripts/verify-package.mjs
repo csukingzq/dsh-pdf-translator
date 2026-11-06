@@ -9,6 +9,7 @@ const required = [
   'package/lib/client.js',
   'package/cordis.patch.yml',
   'package/work/cli.py',
+  'package/work/document_structure.py',
   'package/scripts/setup.ps1',
   'package/config.example.json',
   'package/README.md',

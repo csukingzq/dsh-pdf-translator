@@ -10,6 +10,12 @@ from cli import exclusive
 
 
 class AiOnlyTests(unittest.TestCase):
+    def setUp(self):
+        reader = patch.object(pipeline, 'request_structure', side_effect=lambda llm, images: {
+            'pages':[dict(page=n,is_contents=False,printed_page='',regions=[],entries=[]) for n,_ in images]})
+        self.structure_reader = reader.start()
+        self.addCleanup(reader.stop)
+
     def test_first_request_carries_original_and_coordinate_guide_in_one_call(self):
         cfg = SimpleNamespace(base_url='https://example.invalid/v1', api_key='test-key', model='vision')
         result = {'complete':True,'blocks':[{'kind':'figure','bbox':[.1,.1,.9,.9],'markdown':'距离'}]}
@@ -76,8 +82,10 @@ class AiOnlyTests(unittest.TestCase):
             result = pipeline.run_document(source, '1', cfg, workers=1, data_dir=folder)
             self.assertEqual(request.call_count, 1)
             request.reset_mock()
+            self.structure_reader.reset_mock()
             pipeline.run_document(source, 'all', cfg, workers=1, data_dir=folder, render_only=True)
             request.assert_not_called()
+            self.structure_reader.assert_not_called()
             report = json.loads(Path(result['report']).read_text('utf-8'))
             self.assertIsNone(report['ocr'])
             self.assertEqual(report['formula_review']['mode'], 'ai')
