@@ -29,6 +29,93 @@ def index(nodes=None, pages=None):
 
 
 class StructureTests(unittest.TestCase):
+    def test_reflowed_contents_pages_links_and_chapter_breaks(self):
+        from latex_renderer import render_latex
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root/'source.pdf'
+            with pymupdf.open() as doc:
+                first = doc.new_page()
+                first.insert_text((50, 60), 'Contents')
+                first.insert_text((50, 90), 'Alpha ........ 101')
+                first.insert_text((70, 110), 'Detail ........ 102')
+                second = doc.new_page()
+                second.insert_text((50, 90), 'Beta ........ 187')
+                second.insert_text((50, 110), 'Missing ........ 299')
+                doc.new_page()
+                doc.new_page()
+                doc.save(source)
+            evidence = build_source_index(source, [1,2,3,4])
+            raw = [page(1, block('Contents'), block('Alpha ........ 101'), block('Detail ........ 102')),
+                   page(2, block('Beta ........ 187'), block('Missing ........ 299')),
+                   page(3, dict(block('Alpha'), markdown='Translated Alpha'), block('First body'),
+                        dict(block('Detail'), markdown='Translated Detail'), block('Detail body')),
+                   page(4, dict(block('Beta'), markdown='Translated Beta'), block('Second body'))]
+            resolved = self.resolve(raw, evidence)
+            text = assemble(resolved['pages'], None, root)
+            self.assertNotIn('187', text)
+            self.assertEqual(text.count('# 目录'), 1)
+            self.assertIn('## Translated Detail', text)
+            self.assertIn('contents_target_not_in_output', [d['reason'] for d in resolved['diagnostics']])
+            output = root/'book.pdf'
+            render_latex(text, root, output)
+            with pymupdf.open(output) as pdf:
+                self.assertEqual(len(pdf), 3)
+                contents = pdf[0].get_text()
+                for title, folio in [('Translated Alpha', 2), ('Translated Detail', 2), ('Translated Beta', 3)]:
+                    self.assertRegex(contents, title + r'[\s.·…]*' + str(folio))
+                self.assertIn('Missing', contents)
+                self.assertNotIn('??', contents)
+                self.assertIn('Detail body', pdf[1].get_text())
+                self.assertIn('Second body', pdf[2].get_text())
+                destinations = {link.get('page') for link in pdf[0].get_links()}
+                self.assertTrue({1,2}.issubset(destinations), destinations)
+
+    def test_sixth_level_contents_entry_has_a_pdf_destination(self):
+        from latex_renderer import render_latex
+        with tempfile.TemporaryDirectory() as folder:
+            out = Path(folder)/'deep.pdf'
+            text = ('::: {.translator-toc-entry level=6 target=dsh-p2-b1}\n\n[]{}Deep\n\n:::\n\n'
+                    '<!-- translator-chapter-start -->\n\n###### Deep {#dsh-p2-b1}\n\nBody')
+            render_latex(text, Path(folder), out)
+            with pymupdf.open(out) as doc:
+                self.assertRegex(doc[0].get_text(), r'Deep[\s.·…]*2')
+                self.assertTrue(any(link.get('page') == 1 for link in doc[0].get_links()))
+
+    def test_only_chapter_titles_break_without_a_contents_page(self):
+        raw = [page(1, block('Introduction', kind='heading'), block('Methods', kind='heading'),
+                    block('Chapter IV: Results', kind='heading'))]
+        text = assemble(self.resolve(raw)['pages'], None, Path('.'))
+        self.assertEqual(text.count('<!-- translator-chapter-start -->'), 1)
+        self.assertNotIn('translator-contents', text)
+
+    def test_printed_hierarchy_corrects_flat_bookmarks_and_partial_contents(self):
+        with tempfile.TemporaryDirectory() as folder:
+            source = Path(folder)/'flat.pdf'
+            with pymupdf.open() as doc:
+                for _ in range(3):
+                    doc.new_page()
+                doc.set_toc([[1,'Foundations',2], [1,'Applications',3]])
+                doc.save(source)
+            rows = [dict(title='Foundations', level=1, printed_page='i'),
+                    dict(title='Applications', level=2, printed_page='80')]
+            def analyze(images):
+                return {'pages':[dict(page=n, is_contents=n==1, entries=rows if n==1 else [])
+                                 for n, _ in images]}
+            evidence = build_source_index(source, [1,3], analyze=analyze)
+            raw = [page(1, block('Contents'), block('Foundations ........ i'),
+                        block('Applications ........ 80'), block('Read Foundations before the exercises.')),
+                   page(3, block('Applications'))]
+            result = self.resolve(raw, evidence)
+            section = result['pages'][1]['blocks'][0]
+            self.assertEqual(section['heading_level'], 2)
+            self.assertEqual(section['parent_id'], 'outline-0')
+            text = assemble(result['pages'], None, Path(folder))
+            self.assertNotIn('80', text)
+            self.assertIn('Read Foundations before the exercises.', text)
+            self.assertNotIn('translator-chapter-start', text)
+            self.assertEqual(text.count('target=dsh-'), 1)
+
     def test_font_rounding_never_turns_short_body_into_margin(self):
         evidence=index()
         for n in range(1,5):

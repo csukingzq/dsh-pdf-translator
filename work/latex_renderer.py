@@ -787,7 +787,8 @@ def apply_regions(tex, columns=1):
     if columns == 2:
         anchor = tex.index(r'\begin{document}')+len(r'\begin{document}')
         first = tex.find(r'\typeout{TRANSLATOR-COLUMNS-BEGIN')
-        if first > anchor and tex[anchor:first].strip():
+        if (first > anchor and tex[anchor:first].strip()
+                and not any(marker in tex[anchor:first] for marker in (r'\DSHContentsBegin', r'\DSHChapterStart'))):
             # The title block belongs to the full width above both columns.
             title = tex[anchor:first]
             special_texts = []
@@ -823,6 +824,9 @@ def apply_regions(tex, columns=1):
                             + str(len(notes)-i-1) + r'\relax]{' + note + '}\n'
                             for i, note in enumerate(notes))
             tex = (tex[:anchor]+'\n'+r'\twocolumn[{' + title + '}]'+'\n'+texts+'\n'.join(special_texts)+'\n'+tex[first:])
+    tex = tex.replace(r'\DSHContentsBegin', r'\onecolumn' if columns == 2 else r'\clearpage')
+    tex = tex.replace(r'\DSHContentsEnd', r'\twocolumn' if columns == 2 else r'\clearpage')
+    tex = tex.replace(r'\DSHChapterStart', r'\clearpage')
     for pattern, replace in region_patterns(columns):
         tex = pattern.sub(replace, tex)
     return tex
@@ -928,6 +932,33 @@ def build_project(text, source_dir, project):
             return node
         kind = node.get('t')
         content = node.get('c')
+        if kind == 'Header' and content[0] == 6 and re.fullmatch(r'dsh-[a-zA-Z0-9_-]+', content[1][0]):
+            # The article writer emits level six as plain text and drops its ID.
+            # Anchor inside the heading line so even a page break before it is safe.
+            anchor = r'\phantomsection\label{' + content[1][0] + '}'
+            return {'t':'Para', 'c':[{'t':'RawInline','c':['latex',anchor]},
+                                     {'t':'Strong','c':visit(content[2])}]}
+        if kind == 'RawBlock' and content[0] == 'html':
+            command = {'<!-- translator-contents-begin -->': r'\DSHContentsBegin',
+                       '<!-- translator-contents-end -->': r'\DSHContentsEnd',
+                       '<!-- translator-chapter-start -->': r'\DSHChapterStart'}.get(content[1].strip())
+            if command:
+                return {'t':'RawBlock', 'c':['latex', command]}
+        if kind == 'Div' and 'translator-toc-entry' in content[0][1]:
+            attrs = dict(content[0][2])
+            level = attrs.get('level', '')
+            target = attrs.get('target', '')
+            if level in ('1','2','3','4','5','6') and len(content[1]) == 1 and content[1][0]['t'] == 'Para':
+                title = visit(content[1][0]['c'])
+                indent = str(int(level)-1)
+                opening = r'\begingroup\leftskip=' + indent + r'em\noindent '
+                if re.fullmatch(r'dsh-[a-zA-Z0-9_-]+', target):
+                    opening += r'\hyperref[' + target + ']{'
+                    ending = r'}\nobreak\dotfill\nobreak\pageref{' + target + '}'
+                else:
+                    ending = r'\nobreak\dotfill\nobreak\textemdash{}'
+                return {'t':'Para','c':[{'t':'RawInline','c':['latex',opening]}, *title,
+                    {'t':'RawInline','c':['latex',ending+r'\par\endgroup']}]}
         if kind == 'TranslatorFigure':
             blocks = [visit(item) for item in content]
             body = run([pandoc,'-f','json','-t','latex'],json.dumps({**ast,'blocks':blocks}))

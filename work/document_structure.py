@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pymupdf
 
-STRUCTURE_VERSION = 'document-structure-v4'
+STRUCTURE_VERSION = 'document-structure-v5'
 # Evidence format changes independently: resolver upgrades must not buy the
 # same vision observations again. The initial format shares the v1 identifier.
 SOURCE_EVIDENCE_VERSION = 'document-structure-v1'
@@ -26,7 +26,8 @@ LABEL = re.compile(r'^(?:(?:\d+(?:\.\d+)*|[IVXLCDM]+)[.)：:]?\s*)?'
                    r'(?:定理|引理|定义|证明|例题|例|命题|推论|评注|程序|输出|'
                    r'Theorem\b|Lemma\b|Definition\b|Proof\b|Example\b|'
                    r'Proposition\b|Corollary\b|Remark\b)', re.I)
-TOC_TITLE = re.compile(r'^(?:contents|table of contents|目录)$', re.I)
+TOC_TITLE = re.compile(r'^(?:contents|table\s+of\s+contents|目\s*[录錄])$', re.I)
+CHAPTER_TITLE = re.compile(r'^(?:chapter\s+(?:\d+|[ivxlcdm]+)\b|第\s*[\d一二三四五六七八九十百〇零两]+\s*章(?=[\s:：]|$))', re.I)
 
 
 def fingerprint(value):
@@ -70,7 +71,7 @@ def number_key(text):
 
 def numbered_level(text):
     text = title_text(text)
-    if re.match(r'^(?:chapter\s+(?:\d+|[ivxlcdm]+)\b|第\s*[\d一二三四五六七八九十百]+\s*章(?:\s|$))', text, re.I):
+    if CHAPTER_TITLE.match(text):
         return 1
     if re.match(r'^§\s*\d+[.*]?\s*\S', text):
         return 2
@@ -149,6 +150,30 @@ def _page_number(label):
     return None
 
 
+def contents_block(block, info):
+    """Identify printed contents material without absorbing surrounding prose."""
+    source = title_text(block['source_text'])
+    if TOC_TITLE.fullmatch(source) or _page_number(source) or block.get('role_candidate') in (
+            'toc_entry', 'page_number', 'running_header', 'running_footer'):
+        return True
+    key = normal(source)
+    if not key:
+        return False
+    for region in info.get('regions', []):
+        if (region['role'] == 'toc_entry' and normal(region['source_text']) == key
+                and _intersection(block['bbox'], region['bbox']) > 0):
+            return True
+    # One recognition block can contain multiple rows or a title without its
+    # separately extracted folio. A mention of a chapter inside prose is kept.
+    for entry in info['entries']:
+        name = normal(entry['title'])
+        folio = normal(entry['printed_page'])
+        if name and (key == name or (folio and name+folio in key) or
+                     (block['kind'] == 'table' and name in key)):
+            return True
+    return bool(re.search(r'[.·…]{2,}\s*(?:\d+|[ivxlcdm]+)\s*$', source, re.I))
+
+
 def page_segments(anchors):
     """Do not extrapolate across gaps: only observed consistent runs are mapped."""
     segments = []
@@ -166,6 +191,37 @@ def page_segments(anchors):
             segments.append(dict(style=style, offset=offset, physical_start=physical,
                                  physical_end=physical, printed_start=number, printed_end=number))
     return segments
+
+
+def native_contents(pages):
+    """Recover leader-separated entries when structural observations are unavailable."""
+    continued = False
+    indents = []
+    for info in pages.values():
+        if info.get('entries'):
+            continued = True
+            continue
+        lines = info['lines']
+        title = any(TOC_TITLE.fullmatch(line['source_text']) for line in lines)
+        if title:
+            indents = []
+        if not (continued or title or info.get('is_contents')):
+            continue
+        entries = []
+        for line in lines:
+            row = re.fullmatch(r'(.+?)\s*(?:[.·…\s]*[.·…]{2,}[.·…\s]*|\s{2,})(\d+|[ivxlcdm]+)',
+                               line['source_text'], re.I)
+            if row:
+                entries.append((line['bbox'][0], row[1].strip(), row[2]))
+        continued = bool(entries)
+        if entries:
+            for left, _, _ in sorted(entries):
+                if not any(abs(left-x) < .015 for x in indents):
+                    indents.append(left)
+            indents.sort()
+            info.update(is_contents=True, entries=[dict(title=t, printed_page=folio,
+                level=min(6, 1+min(range(len(indents)), key=lambda i:abs(indents[i]-x))))
+                for x,t,folio in entries])
 
 
 def build_source_index(source, selected, cache=None, analysis_config=None, analyze=None):
@@ -224,6 +280,8 @@ def build_source_index(source, selected, cache=None, analysis_config=None, analy
             probes = set(range(start, min(end, start+12, len(doc)+1)))
         else:
             probes = set(range(1, min(20, len(doc))+1))
+        probes.update(int(n) for n, info in index['pages'].items()
+                      if any(TOC_TITLE.fullmatch(line['source_text']) for line in info['lines']))
         # Bound extra sampling; translation itself supplies the remaining pages.
         for n in sorted(set(selected))[:1] + sorted(set(selected))[-1:]:
             probes.update(p for p in (n-1, n, n+1) if 1 <= p <= len(doc))
@@ -232,17 +290,25 @@ def build_source_index(source, selected, cache=None, analysis_config=None, analy
         # cannot reliably establish an unnumbered table of contents hierarchy.
         observations = []
         observation_root = Path(cache)/('source-observations-'+fingerprint([SOURCE_EVIDENCE_VERSION, source_hash, config])) if cache else None
-        pending = []
-        for n in sorted(probes):
-            cached = _read(observation_root/f'{n}.json') if observation_root else None
-            if cached:
-                try:
-                    observations.extend(validate_analysis({'pages':[cached]}, [n]))
-                    continue
-                except (ValueError, KeyError, TypeError):
-                    pass
-            pending.append(n)
-        if analyze:
+        inspected = set()
+        while probes:
+            inspected.update(probes)
+            pending = []
+            for n in sorted(probes):
+                cached = _read(observation_root/f'{n}.json') if observation_root else None
+                if cached:
+                    try:
+                        observations.extend(validate_analysis({'pages':[cached]}, [n]))
+                        continue
+                    except (ValueError, KeyError, TypeError):
+                        pass
+                pending.append(n)
+            if not analyze:
+                if pending and any(not index['pages'][str(n)]['lines'] for n in selected):
+                    index['diagnostics'].append(dict(reason='structure_analysis_unavailable',
+                        detail='离线模式仅使用书签、文字层和已有识别结果。'))
+                # A previous run may have cached a long contents section.
+                pending = []
             for offset in range(0, len(pending), 4):
                 group = pending[offset:offset+4]
                 images = [(n, doc[n-1].get_pixmap(matrix=pymupdf.Matrix(1.5, 1.5)).tobytes('png')) for n in group]
@@ -255,11 +321,10 @@ def build_source_index(source, selected, cache=None, analysis_config=None, analy
                 except (ValueError, KeyError, TypeError, RuntimeError, OSError) as exc:
                     index['diagnostics'].append(dict(reason='structure_analysis_failed', pages=group,
                                                       detail=type(exc).__name__))
-        elif pending and any(not index['pages'][str(n)]['lines'] for n in selected):
-            index['diagnostics'].append(dict(reason='structure_analysis_unavailable',
-                                              detail='离线模式仅使用书签、文字层和已有识别结果。'))
+            probes = {o['page']+1 for o in observations if o['is_contents'] and o['page'] < len(doc)} - inspected
         for observation in observations:
             index['pages'][str(observation['page'])].update(observation)
+        native_contents(index['pages'])
         anchors = [(o['page'], o.get('printed_page', '')) for o in observations]
         for n, page in index['pages'].items():
             candidates = [l['source_text'].strip() for l in page['lines']
@@ -267,10 +332,13 @@ def build_source_index(source, selected, cache=None, analysis_config=None, analy
             if len(candidates) == 1:
                 anchors.append((int(n), candidates[0]))
         index['page_map'] = page_segments(set(anchors))
-        toc_entries = [(o['page'], e) for o in sorted(observations,key=lambda o:o['page']) if o['is_contents'] for e in o.get('entries', [])]
+        toc_entries = [(int(n), e) for n, info in index['pages'].items() if info['is_contents']
+                       for e in info.get('entries', [])]
         toc_stack = []
+        used_nodes = set()
         for ordinal, (toc_page, entry) in enumerate(toc_entries):
-            matches = [n for n in index['nodes'] if similarity(n['title'], entry['title']) >= .85]
+            available = [n for n in index['nodes'] if n['id'] not in used_nodes]
+            matches = [n for n in available if similarity(n['title'], entry['title']) >= .85]
             key_number = number_key(entry['title'])
             if key_number:
                 matches = [n for n in matches if number_key(n['title']) in (None,key_number)]
@@ -284,17 +352,21 @@ def build_source_index(source, selected, cache=None, analysis_config=None, analy
                     # Bookmarks sometimes expand a printed mathematical symbol
                     # into words. Require the same parent, number, level and a
                     # substantial shared title; never match a number globally.
-                    matches = [n for n in index['nodes'] if n['parent_id'] == parent['id']
+                    matches = [n for n in available if n['parent_id'] == parent['id']
                                and n['level'] == entry['level'] and number_key(n['title']) == key_number
                                and similarity(n['title'],entry['title']) >= .6]
             if not matches:
                 parsed = _page_number(entry['printed_page'])
                 targets = [] if parsed is None else [s['offset']+parsed[1] for s in index['page_map']
                     if s['style']==parsed[0] and s['printed_start']<=parsed[1]<=s['printed_end']]
-                # An independently mapped page plus exact title can expose a
-                # TOC level error. Keep the existing parent instead of cloning.
-                matches = [n for n in index['nodes'] if n.get('page') in targets
+                # A unique title on a mapped page can recover a bookmark even
+                # when the PDF outline flattened the printed hierarchy.
+                matches = [n for n in available if n.get('page') in targets
                            and similarity(n['title'],entry['title']) >= .98]
+                if not matches:
+                    exact = [n for n in available if normal(n['title']) == normal(entry['title'])]
+                    if len(exact) == 1:
+                        matches = exact
             parsed = _page_number(entry['printed_page'])
             mapped = [] if parsed is None else [s['offset']+parsed[1] for s in index['page_map']
                 if s['style']==parsed[0] and s['printed_start']<=parsed[1]<=s['printed_end']]
@@ -308,7 +380,8 @@ def build_source_index(source, selected, cache=None, analysis_config=None, analy
                 node = matches[0]
                 if node['level'] != entry['level']:
                     index['diagnostics'].append(dict(reason='toc_bookmark_conflict', node=node['id'], page=toc_page))
-                node.update(printed_page=entry['printed_page'], toc_title=entry['title'])
+                node.update(printed_page=entry['printed_page'], toc_title=entry['title'],
+                            level=entry['level'], parent_id=parent['id'] if parent else None)
             else:
                 parsed = _page_number(entry['printed_page'])
                 targets = [] if parsed is None else [s['offset']+parsed[1] for s in index['page_map']
@@ -318,7 +391,8 @@ def build_source_index(source, selected, cache=None, analysis_config=None, analy
                             printed_page=entry['printed_page'], parent_id=parent['id'] if parent else None,
                             evidence='visual_contents')
                 index['nodes'].append(node)
-                index['diagnostics'].append(dict(reason='unmatched_contents_entry', node=node['id'], page=toc_page))
+            entry['node_id'] = node['id']
+            used_nodes.add(node['id'])
             toc_stack.append(node)
         anchors.extend((n['page'],n['printed_page']) for n in index['nodes'] if n.get('page') and n.get('printed_page'))
         index['page_map'] = page_segments(set(anchors))
@@ -433,6 +507,16 @@ def resolve_document_structure(raw_pages, source_index, overrides=None):
     for page in pages:
         number = page['page']
         evidence = index.get('pages', {}).get(str(number), {})
+        page.pop('contents_entries', None)
+        if evidence.get('is_contents'):
+            page['contents_entries'] = copy.deepcopy(evidence.get('entries', []))
+            # Review documents saved before v0.7 did not store this association.
+            for entry in page['contents_entries']:
+                if 'node_id' not in entry:
+                    same = [n for n in nodes if entry['title'] in (n['title'], n.get('toc_title'))
+                            and n.get('printed_page') == entry['printed_page']]
+                    if len(same) == 1:
+                        entry['node_id'] = same[0]['id']
         if page.get('recognition_schema') != 2:
             legacy_pages.append(number)
         for position, block in enumerate(page['blocks'], 1):
@@ -447,7 +531,7 @@ def resolve_document_structure(raw_pages, source_index, overrides=None):
                     original[field] = copy.deepcopy(block[field])
             for field in ('kind', 'markdown', 'bbox'):
                 block[field] = copy.deepcopy(original[field])
-            for field in ('excluded', 'heading_level', 'parent_id', 'structure_node', 'merged_into', 'source_ids'):
+            for field in ('excluded', 'heading_level', 'parent_id', 'structure_node', 'merged_into', 'source_ids', 'chapter_start'):
                 block.pop(field, None)
             block['source_text'] = _source_text(block, evidence)
             block.pop('source_bbox', None)
@@ -533,10 +617,12 @@ def resolve_document_structure(raw_pages, source_index, overrides=None):
                 diagnostics.append(dict(reason='multiple_outline_nodes', block=candidates[0][1]))
     matched_nodes = {n['id'] for n in matches.values()}
     selected_pages = {p['page'] for p in pages}
+    has_contents = any(p.get('is_contents') for p in index.get('pages', {}).values())
     for node in nodes:
-        if node.get('page') in selected_pages and node['id'] not in matched_nodes:
+        contents_node = (TOC_TITLE.fullmatch(node['title'].strip()) and
+                         index.get('pages', {}).get(str(node.get('page')), {}).get('is_contents'))
+        if not contents_node and node.get('page') in selected_pages and node['id'] not in matched_nodes:
             diagnostics.append(dict(reason='outline_heading_not_found', node=node['id'], page=node['page']))
-
     for block in all_blocks:
         number = block['page']
         page_info = index.get('pages', {}).get(str(number), {})
@@ -553,6 +639,9 @@ def resolve_document_structure(raw_pages, source_index, overrides=None):
             if role == 'heading':
                 block.update(kind='heading', heading_level=level, parent_id=parent,
                              markdown='#'*level+' '+title_text(block['markdown']).replace('\n', ' '))
+                if (CHAPTER_TITLE.match(title_text(block['source_text']))
+                        or (has_contents and level == 1 and (node or source == 'review_override'))):
+                    block['chapter_start'] = True
             elif block['kind'] == 'heading':
                 block.update(kind='paragraph', markdown='**'+title_text(block['markdown'])+'**')
         if override is not None:
@@ -569,6 +658,10 @@ def resolve_document_structure(raw_pages, source_index, overrides=None):
                 node['override_role'] = override['role']
                 node['excluded_from_outline'] = True
             continue
+        if page_info.get('is_contents') and page_info.get('entries') and contents_block(block, page_info):
+            decide('toc_entry', 'rebuilt_contents')
+            block['excluded'] = True
+            continue
         if block.get('status') == 'source_image' or block['kind'] in {'figure', 'table', 'equation', 'uncertain'}:
             block['role'] = block['kind']
             continue
@@ -579,7 +672,7 @@ def resolve_document_structure(raw_pages, source_index, overrides=None):
             decide('heading', 'outline_title_match', node['level'], node.get('parent_id'))
             block['structure_node'] = node['id']
             continue
-        if page_info.get('is_contents') and not TOC_TITLE.match(block['source_text'].strip()):
+        if page_info.get('is_contents') and not page_info.get('entries') and not TOC_TITLE.match(block['source_text'].strip()):
             decide('toc_entry', 'contents_page')
             continue
         if is_body_label(block['source_text']) or is_body_label(block['markdown']):
@@ -700,6 +793,13 @@ def resolve_document_structure(raw_pages, source_index, overrides=None):
         for block in page['blocks']:
             block['structure_rendered'] = {k:copy.deepcopy(block[k]) for k in ('kind','markdown','bbox')}
     from semantic_document import bind_notes
+    visible_nodes = {b.get('structure_node') for b in all_blocks if b['role'] == 'heading' and not b['excluded']}
+    for p in pages:
+        for entry in p.get('contents_entries', []):
+            if entry.get('node_id') not in visible_nodes:
+                diagnostics.append(dict(reason='contents_target_not_in_output', page=p['page'], title=entry['title']))
+        if 'contents_entries' in p and not p['contents_entries']:
+            diagnostics.append(dict(reason='contents_entries_unavailable', page=p['page']))
     notes, note_diagnostics = bind_notes(pages, index)
     diagnostics.extend(note_diagnostics)
     for page in pages:
