@@ -22,6 +22,18 @@ def document(*blocks):
 
 
 class SemanticTests(unittest.TestCase):
+    def test_retry_translates_prose_around_protected_math_and_reuses_cache(self):
+        raw = document(block('p1-b1','Let $m$ and $n$ be integers.'))
+        pages = resolve_document_structure(raw, {})['pages']
+        def request(payload, error):
+            return {'units':[dict(id=u['id'], text='译文' if '/text-' in u['id'] else 'missing')
+                             for u in payload['units']]}
+        with tempfile.TemporaryDirectory() as folder:
+            result = translate_document(pages, [], folder, {}, request)
+            self.assertEqual(result['pages'][0]['blocks'][0]['markdown'], '译文$m$译文$n$译文')
+            self.assertFalse(result['diagnostics'])
+            self.assertEqual(result, translate_document(pages, [], folder, {}, lambda *args:self.fail('cache miss')))
+
     def test_author_star_and_unmarked_publication_note(self):
         pages=document(block('authors','Lei Bi a, Ping Yang a,*, George W. Kattawar b, Michael I. Mishchenko c'),
                        block('correspondence','[^1]: 通讯地址：University','footnote'),

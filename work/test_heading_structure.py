@@ -29,6 +29,42 @@ def index(nodes=None, pages=None):
 
 
 class StructureTests(unittest.TestCase):
+    def test_changing_header_with_book_title_is_not_a_proof_or_a_fixed_header(self):
+        names = ['Introduction', 'Proofs and logic', 'Sets']
+        book = 'Elementary Mathematical Methods'
+        evidence = index(pages={str(i):{'lines':[
+            dict(source_text=name,bbox=[.1,.05,.4,.07]),
+            dict(source_text=book,bbox=[.5,.05,.9,.07])]}
+            for i,name in enumerate(names,1)})
+        raw = [page(i,dict(block(name+'  '+book,[.1,.05,.9,.07],role='running_header'),
+                           markdown='证明与逻辑' if i==2 else name))
+               for i,name in enumerate(names,1)]
+        result = self.resolve(raw,evidence)
+        self.assertTrue(all(p['blocks'][0]['excluded'] for p in result['pages']))
+        self.assertNotIn('translator-source-header',assemble(result['pages'],None,Path('.')))
+
+    def test_numberless_bookmarks_repeated_chapter_and_first_section(self):
+        with tempfile.TemporaryDirectory() as folder:
+            source = Path(folder)/'book.pdf'
+            with pymupdf.open() as pdf:
+                for _ in range(3):
+                    pdf.new_page()
+                pdf.set_toc([[1,'Arithmetic',2],[2,'Arithmetic',2],[2,'Multiple moduli',3]])
+                pdf.save(source)
+            titles = ['5 Arithmetic','5.1 Arithmetic','5.2 Multiple moduli']
+            def analyze(images):
+                entries = [dict(title=t, level=1 if i==0 else 2, printed_page='2' if i<2 else '3')
+                           for i,t in enumerate(titles)]
+                return {'pages':[dict(page=n, printed_page=str(n), is_contents=n==1, entries=entries if n==1 else [])
+                                 for n,_ in images]}
+            index = build_source_index(source,[1,2,3],analyze=analyze)
+            raw = [page(1,block('Contents')),page(2,block(titles[0]),block(titles[1])),page(3,block(titles[2]))]
+            result = self.resolve(raw,index)
+            self.assertEqual(len(index['nodes']),3)
+            self.assertEqual([b['structure_node'] for p in result['pages'][1:] for b in p['blocks']],
+                             ['outline-0','outline-1','outline-2'])
+            self.assertNotIn('contents_target_not_in_output',[d['reason'] for d in result['diagnostics']])
+
     def test_reflowed_contents_pages_links_and_chapter_breaks(self):
         from latex_renderer import render_latex
         with tempfile.TemporaryDirectory() as folder:

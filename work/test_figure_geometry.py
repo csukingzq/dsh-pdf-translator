@@ -9,6 +9,17 @@ from document_pipeline import assemble
 
 
 class FigureGeometryTests(unittest.TestCase):
+    def test_numeric_diagram_includes_outlying_digit_on_last_row(self):
+        with pymupdf.open() as pdf:
+            page = pdf.new_page(width=400,height=600)
+            for row in range(4):
+                for i in range(row+1):
+                    page.insert_text((200-9*row+18*i,200+12*row),'1',fontsize=9)
+            result = resolve_figure_crop(page,[.42,.31,.55,.40])
+            self.assertEqual(result['decision'],'native_numeric_rows')
+            self.assertEqual(result['label_regions'],10)
+            self.assertGreater(result['bbox'][2]*400,230)
+
     def test_confirmed_truncation_blocks_output_instead_of_using_seed(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);source=root/'source.pdf'

@@ -353,6 +353,18 @@ def multiline_radical(body):
     return r'\sqrt{\begin{gathered}' + r' \\ '.join(lines) + r'\end{gathered}}' + value[end:]
 
 
+MATH_TEXT_ZH = {'and':'且', 'or':'或', 'where':'其中', 'if':'若', 'otherwise':'其他情况',
+                'otherwise.':'其他情况。', 'integer':'整数', 'terms':'项', 'first':'前',
+                'rest of the terms':'其余各项', 'lhs':'左端'}
+
+
+def translate_math_labels(value):
+    def label(match):
+        text = match[1].strip().lower()
+        return r'\text{' + MATH_TEXT_ZH[text] + '}' if text in MATH_TEXT_ZH else match[0]
+    return re.sub(r'\\text\{([^{}]*)\}', label, value)
+
+
 def display_command(body):
     return r'\DisplayMathFit' if FIT_BODY.search(body) else r'\DisplayMath'
 
@@ -377,10 +389,11 @@ def display_math(value):
     label = tags[0] if tags else ''
     if not FIT_BODY.search(body) and len(body) > 85:
         sides = split_math(body, '=')
-        if len(sides) >= 2 and len(sides[0]) < 45:
-            # Keep the equality and all tokens; separate the short LHS from an
-            # indivisible sum/product instead of spilling it under the number.
-            body = r'\begin{gathered}' + sides[0] + r'= \\ ' + '='.join(sides[1:]) + r'\end{gathered}'
+        if len(sides) > 2 and r'\left' not in body and r'\right' not in body:
+            # Keep the first equality complete. Subsequent equalities start
+            # continuation lines; a single indivisible RHS fits as one display.
+            body = r'\begin{gathered}' + '='.join(sides[:2]) + ''.join(
+                r' \\ {}=' + side for side in sides[2:]) + r'\end{gathered}'
     if label and not re.fullmatch(r'[\w.()\- ]+', label):
         label = r'\ensuremath{'+label+'}'
     return display_command(body)+'{'+body+'}{'+label+'}'
@@ -1034,7 +1047,7 @@ def build_project(text, source_dir, project):
         if kind == 'Para' and len(content) == 1 and content[0].get('t') == 'Str' and content[0]['c'] in tables:
             return visit(tables[content[0]['c']])
         if kind == 'Math':
-            value = safe_math(content[1])
+            value = translate_math_labels(safe_math(content[1]))
             region_id = len(math_regions)
             math_regions.append({'id': region_id, 'latex': content[1], 'engine_latex': value})
             start = r'\typeout{TRANSLATOR-MATH-BEGIN:' + str(region_id) + '}'

@@ -1,6 +1,6 @@
 # DeepSeek Harness PDF 翻译插件
 
-**当前正式版：0.7.0。** 将英文等原文 PDF 翻译为中文，使用 LaTeX 重排，交付 PDF 和可编辑源码包。默认保留原文栏数：双栏论文继续使用双栏正文，原文跨栏大图可以跨栏；不承诺保留原分页和文字坐标。
+**当前正式版：0.8.0。** 将英文等原文 PDF 翻译为中文，使用 LaTeX 重排，交付 PDF 和可编辑源码包。默认保留原文栏数：双栏论文继续使用双栏正文，原文跨栏大图可以跨栏；不承诺保留原分页和文字坐标。
 
 ## 当前处理流程
 
@@ -58,13 +58,15 @@ npm 包地址：<https://www.npmjs.com/package/dsh-pdf-translator>
 桌面版：
 
 1. 打开 DSH，点击 **插件 → 添加插件**。
-2. 输入 `dsh-pdf-translator@0.7.0`，点击 **安装**，然后 **立即启用**。
+2. 输入 `dsh-pdf-translator@0.8.0`，点击 **安装**，然后 **立即启用**。
 
 CLI：
 
 ```powershell
-npx.cmd @deepseek-ai/dsh plugin --profile web add dsh-pdf-translator@0.7.0
+npx.cmd @deepseek-ai/dsh plugin --profile web add dsh-pdf-translator@0.8.0
 ```
+
+打开 PDF 翻译面板后会通过 DSH 插件市场检查版本。也可点 **检查更新** 手动刷新，再点 **更新插件**；面板会显示安装结果，以及是否需要刷新或重启。没有兼容的市场接口时，手动检查会查询 npm 并提供新版安装包入口。
 
 ### 方式二：GitHub Release
 
@@ -186,7 +188,7 @@ npm.cmd run check
 npm.cmd test
 .venv\Scripts\python.exe -m unittest discover -s work -p 'test_*.py'
 npm.cmd pack
-node scripts\verify-package.mjs dsh-pdf-translator-0.7.0.tgz
+node scripts\verify-package.mjs dsh-pdf-translator-0.8.0.tgz
 ```
 
 只提交源码、合成 PDF 与最小测试样本；完整原书、私人会话和任务缓存不纳入仓库或安装包。

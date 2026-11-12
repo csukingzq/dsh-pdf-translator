@@ -171,6 +171,25 @@ def restore(text, values):
     return text
 
 
+def retry_payload(payload, batch, failures):
+    """On the last attempt, keep damaged placeholders out of the model's output."""
+    units, slots = [], {}
+    for u, row in zip(batch, payload['units']):
+        if '占位符' not in failures.get(u['id'], '') or len(u['protected']) < 2:
+            units.append(row)
+            continue
+        pieces = re.split(r'(⟦KEEP\d+⟧)', row['text'])
+        slots[u['id']] = []
+        for i, piece in enumerate(pieces):
+            if i % 2 or not re.search(r'[A-Za-z]', piece):
+                slots[u['id']].append((None, piece))
+            else:
+                key = f"{u['id']}/text-{i}"
+                units.append(dict(row, id=key, text=piece))
+                slots[u['id']].append((key, piece))
+    return dict(payload, units=units), slots
+
+
 def units_for(pages, tree):
     nodes = {n['id']: n for n in tree}
     context, units = [], []
@@ -277,7 +296,6 @@ def translate_document(pages, tree, cache, model_config, request, glossary=None,
     folder = Path(cache)/'semantic-translations'
     folder.mkdir(parents=True, exist_ok=True)
     def run_batch(batch):
-        ids = {u['id'] for u in batch}
         start = units.index(batch[0])
         end = units.index(batch[-1]) + 1
         anchor_ids = {a for u in batch for a in u['anchors']}
@@ -293,16 +311,22 @@ def translate_document(pages, tree, cache, model_config, request, glossary=None,
         path = folder/(key+'.json')
         error = None
         accepted = {}
+        accepted_raw = {}
         failures = {}
         for attempt in range(3):
             try:
                 if any(sum(1 if ord(c)>127 else .33 for c in u['text'])>2000 for u in batch):
                     raise ValueError('超长单元缺少安全句子边界，需要人工拆分')
-                response = json.loads(path.read_text('utf-8')) if path.exists() else request(payload, error)
+                query, slots = retry_payload(payload, batch, failures) if attempt == 2 else (payload, {})
+                response = json.loads(path.read_text('utf-8')) if path.exists() else request(query, error)
                 rows = response['units']
-                if len(rows) != len(ids) or {r['id'] for r in rows} != ids:
+                if len(rows) != len(query['units']) or {r['id'] for r in rows} != {r['id'] for r in query['units']}:
                     raise ValueError('翻译单元 ID 缺失或重复')
                 values = {r['id']: r['text'] for r in rows}
+                for key, fragments in slots.items():
+                    if any(not isinstance(values[k], str) or not values[k].strip() for k, _ in fragments if k):
+                        raise ValueError('翻译返回空片段')
+                    values[key] = ''.join(values[k] if k else original for k, original in fragments)
                 failures = {}
                 for u in batch:
                     if u['id'] in accepted:
@@ -318,13 +342,17 @@ def translate_document(pages, tree, cache, model_config, request, glossary=None,
                                 and not re.search('[\u4e00-\u9fff]', values[u['id']])):
                             raise ValueError('英文正文未翻译，保留原文等待核验')
                         accepted[u['id']] = value
+                        accepted_raw[u['id']] = values[u['id']]
                     except (ValueError, KeyError, TypeError) as exc:
                         failures[u['id']] = str(exc)
                 if failures:
                     raise ValueError('; '.join(f'{key}: {value}' for key, value in failures.items()))
                 translated.update(accepted)
                 temp = path.with_suffix('.tmp')
-                temp.write_text(json.dumps(response, ensure_ascii=False), 'utf-8')
+                # Cache complete units with their placeholders, including valid
+                # neighbours retained from earlier attempts.
+                cached = {'units':[dict(id=u['id'], text=accepted_raw[u['id']]) for u in batch]}
+                temp.write_text(json.dumps(cached, ensure_ascii=False), 'utf-8')
                 temp.replace(path)
                 break
             except (ValueError, KeyError, TypeError, TimeoutError, ConnectionError) as exc:

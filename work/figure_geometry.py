@@ -6,7 +6,7 @@ No OCR, model calls, source edits or document-specific coordinates are used.
 import re
 import pymupdf
 
-VERSION = 'figure-geometry-v3'
+VERSION = 'figure-geometry-v4'
 CAPTION = re.compile(r'^\s*(?:Fig(?:ure)?\.?\s*\d|Table\s*\d|[图表]\s*\d)', re.I)
 
 
@@ -112,6 +112,24 @@ def resolve_figure_crop(page, bbox):
         return warn('figure_object_exceeds_search_region', unsafe=oversized_native)
     selected=[r for r in objects if r.intersects(seed)]
     if not selected:
+        # Some diagrams are entirely typeset digits. Follow occupied rows
+        # across the seed boundary, without including prose or a nearby folio.
+        rows = {}
+        for r, text in lines:
+            middle = (r.y0+r.y1)/2
+            if seed.y0 <= middle <= seed.y1 and r.intersects(search):
+                if not re.fullmatch(r'\d+', text) or not search.contains(r):
+                    return warn('figure_native_geometry_unavailable')
+                rows.setdefault(round(middle), []).append(r)
+        if len(rows) >= 3 and sum(len(row) >= 2 for row in rows.values()) >= 2 and all(
+                any(r.intersects(seed) for r in row) for row in rows.values()):
+            digits = [r for row in rows.values() for r in row]
+            tight = expand(union(digits), 2) & bounds
+            if search.contains(tight):
+                result.update(bbox=[tight.x0/bounds.width,tight.y0/bounds.height,
+                                    tight.x1/bounds.width,tight.y1/bounds.height],
+                              decision='native_numeric_rows', label_regions=len(digits))
+                return result
         return warn('figure_native_geometry_unavailable')
     # Include disconnected arrow heads and rasterized rules near the seed;
     # text cannot pull the envelope recursively into adjacent paragraphs.

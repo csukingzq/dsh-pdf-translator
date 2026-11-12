@@ -247,9 +247,11 @@ def execute(request):
     if len(ids) != len(set(ids)):
         raise ValueError('内容块 ID 重复。')
     source_index = doc.get('source_index') or build_source_index(source, [p['page'] for p in pages])
-    if request.get('recomputeStructure'):
+    cached_evidence = any(cache.glob('source-observations-*'))
+    if request.get('recomputeStructure') or (source_index.get('version') != STRUCTURE_VERSION and cached_evidence):
         source_index = build_source_index(source, [p['page'] for p in pages], cache,
             analysis_config=source_index.get('analysis_config'), analyze=None)
+    if request.get('recomputeStructure'):
         # Raw recognition is the immutable recovery source; accepted edits and
         # overrides come from the current version, never from an older cache.
         raw_pages = []

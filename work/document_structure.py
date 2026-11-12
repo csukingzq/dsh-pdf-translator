@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pymupdf
 
-STRUCTURE_VERSION = 'document-structure-v5'
+STRUCTURE_VERSION = 'document-structure-v6'
 # Evidence format changes independently: resolver upgrades must not buy the
 # same vision observations again. The initial format shares the v1 identifier.
 SOURCE_EVIDENCE_VERSION = 'document-structure-v1'
@@ -373,6 +373,15 @@ def build_source_index(source, selected, cache=None, analysis_config=None, analy
             located = [n for n in matches if n.get('page') in mapped]
             if located:
                 matches = located
+            # Bookmarks commonly omit the printed number. Resolve a chapter
+            # and its identically named first section by level and parent.
+            bare_title = re.sub(r'^\s*\d+(?:\.\d+)*[.)]?\s+', '', entry['title'])
+            exact = [n for n in available if normal(n['title']) in (normal(entry['title']), normal(bare_title))
+                     and n['level'] == entry['level']
+                     and n['parent_id'] == (parent['id'] if parent else None)
+                     and (not mapped or n.get('page') in mapped)]
+            if len(exact) == 1:
+                matches = exact
             matches.sort(key=lambda n:similarity(n['title'],entry['title']), reverse=True)
             if len(matches)>1 and similarity(matches[0]['title'],entry['title'])-similarity(matches[1]['title'],entry['title']) >= .05:
                 matches=matches[:1]
@@ -392,6 +401,7 @@ def build_source_index(source, selected, cache=None, analysis_config=None, analy
                             evidence='visual_contents')
                 index['nodes'].append(node)
             entry['node_id'] = node['id']
+            index.setdefault('contents_ids', {})[f'toc-{ordinal}'] = node['id']
             used_nodes.add(node['id'])
             toc_stack.append(node)
         anchors.extend((n['page'],n['printed_page']) for n in index['nodes'] if n.get('page') and n.get('printed_page'))
@@ -574,7 +584,8 @@ def resolve_document_structure(raw_pages, source_index, overrides=None):
                 continue
             score = max(similarity(block['source_text'], node['title']),
                         similarity(block['source_text'], node.get('toc_title', '')))
-            if number_key(block['source_text']) and number_key(node['title']) and number_key(block['source_text']) != number_key(node['title']):
+            expected_number = number_key(node.get('toc_title') or node['title'])
+            if number_key(block['source_text']) and expected_number and number_key(block['source_text']) != expected_number:
                 continue
             # Unmapped TOC entries need a unique complete title, never numbering alone.
             if score < .84:
@@ -646,6 +657,8 @@ def resolve_document_structure(raw_pages, source_index, overrides=None):
                 block.update(kind='paragraph', markdown='**'+title_text(block['markdown'])+'**')
         if override is not None:
             override = validate_override(override)
+            if override.get('parent_id') in index.get('contents_ids', {}):
+                override['parent_id'] = index['contents_ids'][override['parent_id']]
             block['structure_override'] = override
             decide(override['role'], 'review_override', override.get('heading_level'), override.get('parent_id'))
             if override['role'] == 'heading':
@@ -675,6 +688,19 @@ def resolve_document_structure(raw_pages, source_index, overrides=None):
         if page_info.get('is_contents') and not page_info.get('entries') and not TOC_TITLE.match(block['source_text'].strip()):
             decide('toc_entry', 'contents_page')
             continue
+        if edge == 'top' and role == 'running_header':
+            # A changing chapter name and a stable book title often occupy
+            # separate native text runs on the same running-header baseline.
+            tight = block.get('source_bbox', block['bbox'])
+            header_lines = [line for line in page_info.get('lines', [])
+                            if abs(line['bbox'][1]-tight[1]) < .018 and
+                            line['bbox'][2] > tight[0] and line['bbox'][0] < tight[2]]
+            joined = ' '.join(l['source_text'] for l in sorted(header_lines, key=lambda l:l['bbox'][0]))
+            if similarity(joined, block['source_text']) >= .94 and any(
+                    len(normal(l['source_text'])) >= 12 and len({p['page'] for p in native_margins.get(
+                        (_running_key(l['source_text']), edge), [])}) >= 3 for l in header_lines):
+                decide('running_header', 'native_running_title')
+                continue
         if is_body_label(block['source_text']) or is_body_label(block['markdown']):
             decide('body_label', 'semantic_label')
             if re.match(r'^\d+(?:\.\d+){2,}', title_text(block['source_text'])):

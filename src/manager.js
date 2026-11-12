@@ -10,7 +10,7 @@ import {ReviewController, completionPolicy} from './review.js';
 import {SetupController} from './setup.js';
 
 const activeStates = new Set(['preparing', 'running', 'stopping']);
-const phases = {preparing:'准备', analyzing_structure:'分析全文结构', recognizing:'AI 识别与翻译', validating:'校验译文', assembling:'组装译文', compiling:'编译 PDF', exporting:'导出成果', completed:'完成'};
+const phases = {preparing:'准备', analyzing_structure:'分析全文结构', recognizing:'逐页识别', translating_paragraphs:'翻译正文段落', validating:'校验译文', assembling:'组装译文', compiling:'编译 PDF', exporting:'导出成果', completed:'完成'};
 export function progressText(p) {
   return `${phases[p.phase] || p.phase} · ${p.completed || 0}/${p.total || 0} 页 · 缓存 ${p.cached || 0} 页`;
 }

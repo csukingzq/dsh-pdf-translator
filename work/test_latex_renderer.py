@@ -10,6 +10,14 @@ from document_structure import resolve_document_structure
 
 
 class LatexRendererTests(unittest.TestCase):
+    def test_long_single_equality_keeps_its_rhs_and_annotations(self):
+        rhs = r'\underbrace{' + '+'.join('a_{'+str(i)+'}' for i in range(20)) + '}_{n}+x'
+        output = latex_renderer.display_math('q!e='+rhs)
+        self.assertIn('q!e='+rhs, output)
+        self.assertEqual(latex_renderer.translate_math_labels(r'\text{first }m\text{ terms}'),
+                         r'\text{前}m\text{项}')
+        self.assertEqual(latex_renderer.translate_math_labels(r'\mathrm{and}'),r'\mathrm{and}')
+
     def test_special_title_notes_are_visible_without_numeric_marks(self):
         import pymupdf
         with tempfile.TemporaryDirectory() as folder:

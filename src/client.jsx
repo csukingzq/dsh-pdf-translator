@@ -5,6 +5,7 @@ import styles from './panel.css';
 import {useFloatingPosition} from './use-floating-position.js';
 import {pageSelection} from './page-selection.js';
 import {bindSessions} from './session-binding.js';
+import {PluginUpdatePanel} from './plugin-update-panel.jsx';
 
 export const inject=['slots','remote'];
 export function createPanelState(){
@@ -12,7 +13,7 @@ export function createPanelState(){
   return {get:()=>value,subscribe:fn=>{listeners.add(fn);return()=>listeners.delete(fn);},
     set:patch=>{value={...value,...patch};for(const fn of listeners)fn();}};
 }
-const phaseNames={preparing:'准备',analyzing_structure:'分析全文结构',recognizing:'AI 识别与翻译',validating:'校验译文',assembling:'组装译文',compiling:'编译 PDF',exporting:'导出成果',completed:'完成'};
+const phaseNames={preparing:'准备',analyzing_structure:'分析全文结构',recognizing:'逐页识别',translating_paragraphs:'翻译正文段落',validating:'校验译文',assembling:'组装译文',compiling:'编译 PDF',exporting:'导出成果',completed:'完成'};
 const activeStates=new Set(['running','preparing','stopping','reviewing','repairing']);
 const fileName=p=>p?.split(/[\\/]/).pop() || '';
 const formatSize=n=>n>=1048576?(n/1048576).toFixed(1)+' MB':(n/1024).toFixed(1)+' KB';
@@ -157,6 +158,7 @@ export function Panel({store,call,ensureSession}){
           <button disabled={pending} onClick={openConfig}>模型配置</button>
           <button disabled={pending} onClick={()=>{setDialog({kind:'cache'});setConfirmation(null);action(loadCaches);}}>清理缓存</button>
         </div>
+        <PluginUpdatePanel visible={ui.visible} busy={pending||state.busy||Boolean(current)}/>
         <label className="pdf-review-toggle"><span>AI 核验</span><input type="checkbox" role="switch" checked={state.aiReview===true} disabled={pending}
           onChange={e=>{const aiReview=e.target.checked;action(async()=>{const result=await call({action:'settings',aiReview});setState(prev=>({...prev,...result}));});}}/></label>
         {!dialog&&error&&<p role="alert" className="pdf-error">{error}</p>}
