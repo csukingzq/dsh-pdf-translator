@@ -13,8 +13,8 @@ export function createPanelState(){
   return {get:()=>value,subscribe:fn=>{listeners.add(fn);return()=>listeners.delete(fn);},
     set:patch=>{value={...value,...patch};for(const fn of listeners)fn();}};
 }
-const phaseNames={preparing:'准备',analyzing_structure:'分析全文结构',recognizing:'逐页识别',translating_paragraphs:'翻译正文段落',validating:'校验译文',assembling:'组装译文',compiling:'编译 PDF',exporting:'导出成果',completed:'完成'};
-const activeStates=new Set(['running','preparing','stopping','reviewing','repairing']);
+const phaseNames={preparing:'准备',analyzing:'解析版式',glossary:'提取术语',translating:'翻译段落',typesetting:'排版生成 PDF',exporting:'导出成果',completed:'完成'};
+const activeStates=new Set(['running','preparing','stopping']);
 const fileName=p=>p?.split(/[\\/]/).pop() || '';
 const formatSize=n=>n>=1048576?(n/1048576).toFixed(1)+' MB':(n/1024).toFixed(1)+' KB';
 
@@ -45,7 +45,7 @@ export function Panel({store,call,ensureSession}){
   const selection=dialog?.kind==='translate'?pageSelection(pages,dialog.info.pages):null;
   const setup=state.setup;
   const setupReady=!setup||setup.ready!==false;
-  const needsEnvironment=Boolean(setup&&(setup.missing?.python||setup.missing?.runtime));
+  const needsEnvironment=Boolean(setup&&(setup.missing?.python||setup.missing?.engine));
   function close(){setDialog(null);setConfirmation(null);setError('');}
   async function action(fn){
     if(lock.current)return;
@@ -119,7 +119,7 @@ export function Panel({store,call,ensureSession}){
   async function start(valid){
     if(!setupReady)throw new Error('请先完成运行环境准备和模型配置。');
     if(selection.error)throw new Error(selection.error);
-    const args={pdf:dialog.info.path,pages:selection.pages,workers:4,imageQuality:'safe',thinking:'auto',outputDir:state.outputDir,aiReview:state.aiReview===true};
+    const args={pdf:dialog.info.path,pages:selection.pages,workers:4,outputDir:state.outputDir};
     const sessionId=store.get().sessionId || await ensureSession?.();
     if(!sessionId)throw new Error('无法建立会话，请稍后重试。');
     if(store.get().sessionId!==sessionId)throw new Error('当前会话已切换，未启动翻译。');
@@ -127,7 +127,7 @@ export function Panel({store,call,ensureSession}){
     if(store.get().sessionId===sessionId){close();await refresh();}
   }
   const progress=current?.progress;
-  const indeterminate=!progress||progress.phase!=='recognizing';
+  const percent=Math.max(0,Math.min(100,Number(progress?.percent)||0));
   return <div className="pdf-translator-ui">
     <button className="pdf-entry" hidden={ui.visible} ref={entryPosition.ref} style={entryPosition.style} {...entryPosition.handle}
       title="点击打开；拖动或使用方向键移动" aria-expanded={ui.visible} onClick={()=>store.set({visible:true})}>PDF 翻译{current?' ·':''}</button>
@@ -142,7 +142,7 @@ export function Panel({store,call,ensureSession}){
             <div className="pdf-row"><button disabled={pending} onClick={()=>action(cancelSetup)}>取消</button></div>
           </>:<>
             <strong>{needsEnvironment?'首次使用需要准备运行环境':'还差模型配置'}</strong>
-            <small>{needsEnvironment?'约 300 MB，需要联网；视网络情况可能需要几分钟。':'填写接口地址、模型名称和 API 密钥后即可开始翻译。'}</small>
+            <small>{needsEnvironment?'约 1 GB，首次翻译还会下载约 300 MB 模型，需要联网；视网络情况可能需要十几分钟。':'填写接口地址、模型名称和 API 密钥后即可开始翻译。'}</small>
             {setup.error&&<p role="alert" className="pdf-error">{setup.error}</p>}
             {setup.configError&&<p role="alert" className="pdf-error">{setup.configError}</p>}
             {setup.platformOk===false
@@ -159,16 +159,13 @@ export function Panel({store,call,ensureSession}){
           <button disabled={pending} onClick={()=>{setDialog({kind:'cache'});setConfirmation(null);action(loadCaches);}}>清理缓存</button>
         </div>
         <PluginUpdatePanel visible={ui.visible} busy={pending||state.busy||Boolean(current)}/>
-        <label className="pdf-review-toggle"><span>AI 核验</span><input type="checkbox" role="switch" checked={state.aiReview===true} disabled={pending}
-          onChange={e=>{const aiReview=e.target.checked;action(async()=>{const result=await call({action:'settings',aiReview});setState(prev=>({...prev,...result}));});}}/></label>
         {!dialog&&error&&<p role="alert" className="pdf-error">{error}</p>}
         {notice&&<small role="status">{notice}</small>}
         {pending&&!dialog&&<small>请完成系统选择窗口…</small>}
         {current&&<div className="pdf-task" aria-live="polite">
           <strong title={current.args.pdf}>{fileName(current.args.pdf)}</strong>
-          <progress aria-label="翻译进度" max={progress?.total||1} value={indeterminate?undefined:progress?.completed||0}/>
-          <div className="pdf-row"><small>{current.status==='stopping'?'正在取消':current.status==='reviewing'?'AI 核验':current.status==='repairing'?'修复中':phaseNames[progress?.phase]||'准备'}{indeterminate?' · 进行中':''}</small><small>{progress?.completed||0}/{progress?.total||0} 页</small></div>
-          {['reviewing','repairing'].includes(current.status)&&<button disabled={pending} onClick={()=>action(async()=>{await call({action:'cancel',sessionId:ui.sessionId,jobId:current.id});await refresh();})}>取消核验</button>}
+          <progress aria-label="翻译进度" max={100} value={percent}/>
+          <div className="pdf-row"><small>{current.status==='stopping'?'正在取消':phaseNames[progress?.phase]||'准备'}{progress?.stage?` · ${progress.stage}`:''}</small><small>{percent}%{progress?.total?` · ${progress.completed||0}/${progress.total} 段`:''}</small></div>
         </div>}
       </div>
     </section>
@@ -177,7 +174,7 @@ export function Panel({store,call,ensureSession}){
         <p className="pdf-document" title={dialog.info.path}>{fileName(dialog.info.path)} <small>共 {dialog.info.pages} 页</small></p>
         <label>输出目录<small className="pdf-path">{state.outputDir}</small></label>
         <label htmlFor="pdf-pages">翻译页码<input id="pdf-pages" autoFocus value={pages} placeholder="全部，或 1,3,5-8" onChange={e=>setPages(e.target.value)}/></label>
-        {selection.error?<p role="alert" className="pdf-error">{selection.error}</p>:<small>将翻译 {selection.count} 页；留空表示全部。</small>}
+        {selection.error?<p role="alert" className="pdf-error">{selection.error}</p>:<small>将翻译 {selection.count} 页；留空表示全部。输出单语译文与双语对照 PDF。</small>}
         {!setupReady&&<small>请先完成运行环境准备和模型配置。</small>}
         {state.busy&&<small>已有任务运行或正在准备，请在原生任务中查看。</small>}
         <div className="pdf-dialog-actions"><button disabled={pending} onClick={close}>取消</button><button className="pdf-primary" disabled={pending||!!selection.error||state.busy||!state.outputDir||!setupReady} onClick={()=>action(start)}>开始翻译</button></div>
@@ -188,20 +185,20 @@ export function Panel({store,call,ensureSession}){
       </>}
       {dialog.kind==='config'&&<>
         <label htmlFor="pdf-base-url">接口地址<input id="pdf-base-url" autoFocus value={configForm.baseUrl} placeholder="https://api.deepseek.com/v1" onChange={e=>setConfigForm({...configForm,baseUrl:e.target.value})}/></label>
-        <label htmlFor="pdf-model">模型名称<input id="pdf-model" value={configForm.model} placeholder="支持图片输入的模型名" onChange={e=>setConfigForm({...configForm,model:e.target.value})}/></label>
+        <label htmlFor="pdf-model">模型名称<input id="pdf-model" value={configForm.model} placeholder="支持文本翻译的模型名" onChange={e=>setConfigForm({...configForm,model:e.target.value})}/></label>
         <label htmlFor="pdf-api-key">API 密钥<input id="pdf-api-key" type="password" autoComplete="new-password" value={configForm.apiKey} placeholder={state.setup?.config?.hasApiKey?'已保存，留空保持不变':'请输入密钥'} onChange={e=>setConfigForm({...configForm,apiKey:e.target.value})}/></label>
         <small>密钥只保存在本机 config.json，不会上传。</small>
         <div className="pdf-dialog-actions"><button disabled={pending} onClick={close}>取消</button><button className="pdf-primary" disabled={pending||!configForm.baseUrl.trim()||!configForm.model.trim()||(!state.setup?.config?.hasApiKey&&!configForm.apiKey.trim())} onClick={()=>action(saveConfig)}>保存</button></div>
       </>}
       {dialog.kind==='cache'&&<>
-        <small>按文档清理所有模型版本；原 PDF 和导出成果保留。</small>
+        <small>翻译引擎的缓存由所有文档共享，可整体清理；原 PDF 与已导出成果不会删除。</small>
         <button disabled={pending} onClick={()=>action(loadCaches)}>刷新列表</button>
         {(caches?.cleaningDisabled||state.busy)&&<small>翻译或取消任务尚未结束，暂不能清理。</small>}
-        {caches?.entries.length===0&&<small>没有缓存。</small>}
+        {caches?.entries.length===0&&<small>没有缓存记录。</small>}
         <div className="pdf-cache-list">{caches?.entries.map(row=><div className="pdf-cache" key={row.id}>
-          <strong title={row.source}>{row.name}</strong><small>{formatSize(row.bytes)} · {row.busy?'使用中':row.blocked?'受保护':'未使用'}</small>
+          <strong title={row.source}>{row.name}</strong><small>{formatSize(row.bytes)} · {row.blocked?'受保护':row.id==='engine'?'可清理':'文档记录'}</small>
           {row.blocked&&<small>{row.blocked}</small>}
-          <button disabled={pending||state.busy||caches.cleaningDisabled||row.busy||!!row.blocked} onClick={()=>action(async()=>setConfirmation(await call({action:'prepareClear',identity:row.id})))}>清理该文档缓存</button>
+          {row.id==='engine'&&<button disabled={pending||state.busy||caches.cleaningDisabled||!!row.blocked} onClick={()=>action(async()=>setConfirmation(await call({action:'prepareClear',identity:row.id})))}>清理引擎缓存</button>}
         </div>)}</div>
         {confirmation&&<div className="pdf-confirm" role="alertdialog" aria-label="确认清理缓存">
           <strong>{confirmation.name} · {formatSize(confirmation.bytes)}</strong><p>{confirmation.message}</p>

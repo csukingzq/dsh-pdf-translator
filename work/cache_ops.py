@@ -1,104 +1,112 @@
-"""User-directed cache maintenance. Never called automatically or by an AI tool."""
-import json
+"""User-directed cache maintenance. Never called automatically or by an AI tool.
+
+The new kernel keeps one shared translation cache for every document (BabelDOC
+stores it in ``~/.cache/babeldoc``), so cache maintenance is split in two:
+documents are listed read-only from the run registry, and only the shared
+engine cache can be cleared. Exported PDFs are never touched here.
+"""
 import os
-import re
 import shutil
 from pathlib import Path
 
+from index import forget, load as load_runs
 
-def root_path(data_dir):
-    base = Path(data_dir).resolve()
-    for item in [base/'work', base/'work/document-cache']:
-        if item.is_symlink() or (hasattr(item, 'is_junction') and item.is_junction()):
-            raise ValueError('缓存根目录含链接，拒绝操作。')
-    return base/'work/document-cache'
+ENGINE_ID = 'engine'
+ENGINE_LABEL = '翻译引擎共享缓存（BabelDOC）'
 
 
-def safe_tree(root, target):
-    root = root.resolve()
-    if target.is_symlink() or (hasattr(target, 'is_junction') and target.is_junction()):
-        raise ValueError('缓存含链接，拒绝清理。')
-    resolved = target.resolve()
-    if resolved == root or not resolved.is_relative_to(root):
-        raise ValueError('清理范围超出文档缓存。')
-    for base, dirs, files in os.walk(target, followlinks=False):
+def engine_cache_dir():
+    return Path.home() / '.cache' / 'babeldoc'
+
+
+def _is_link(path):
+    return path.is_symlink() or (hasattr(path, 'is_junction') and path.is_junction())
+
+
+def _assert_under(root, target):
+    root, target = Path(root).resolve(), Path(target).resolve()
+    if target != root and not target.is_relative_to(root):
+        raise ValueError('缓存路径超出允许范围。')
+    return target
+
+
+def _walk_guard(root):
+    for base, dirs, files in os.walk(root, followlinks=False):
         for name in dirs + files:
-            item = Path(base)/name
-            if item.is_symlink() or (hasattr(item, 'is_junction') and item.is_junction()):
+            item = Path(base) / name
+            if _is_link(item):
                 raise ValueError('缓存含链接，拒绝清理。')
-            if not item.resolve().is_relative_to(root):
-                raise ValueError('缓存路径超出允许范围。')
-    return resolved
+
+
+def tree_size(root):
+    root = Path(root)
+    if not root.is_dir() or _is_link(root):
+        return 0
+    total = 0
+    for base, _dirs, files in os.walk(root, followlinks=False):
+        for name in files:
+            try:
+                item = Path(base) / name
+                if not _is_link(item):
+                    total += item.stat().st_size
+            except OSError:
+                continue
+    return total
 
 
 def cache_list(data_dir):
-    root = root_path(data_dir)
-    if not root.exists():
-        return []
     rows = []
-    for folder in root.iterdir():
-        if not re.fullmatch('[a-f0-9]{16}', folder.name) or not folder.is_dir():
-            continue
+    documents = {}
+    for entry in load_runs(data_dir):
+        identity = entry['identity']
+        row = documents.get(identity)
+        if row is None:
+            documents[identity] = row = {
+                'id': identity,
+                'name': entry.get('name') or Path(entry.get('source') or '').name or identity,
+                'source': entry.get('source') or '',
+                'bytes': 0,
+                'lastUsed': 0,
+                'blocked': '',
+            }
+        row['bytes'] += int(entry.get('bytes') or 0)
+        row['lastUsed'] = max(row['lastUsed'], int(entry.get('at') or 0))
+    rows.extend(documents.values())
+
+    engine = engine_cache_dir()
+    blocked = ''
+    try:
+        if _is_link(engine):
+            blocked = '引擎缓存目录含链接，拒绝清理。'
+    except OSError:
         blocked = ''
-        try:
-            safe_tree(root, folder)
-        except ValueError as exc:
-            blocked = str(exc)
-        files = [] if blocked else [p for p in folder.rglob('*') if p.is_file()]
-        requests = sorted((p for p in files if p.name == 'request.json'), key=lambda p:p.stat().st_mtime, reverse=True)
-        source = ''
-        if requests:
-            try:
-                source = json.loads(requests[0].read_text('utf-8'))['source']
-            except (ValueError, KeyError):
-                pass
-        rows.append({'id':folder.name, 'name':Path(source).name or folder.name, 'source':source,
-                     'bytes':sum(p.stat().st_size for p in files),
-                     'lastUsed':max((p.stat().st_mtime for p in files), default=folder.stat().st_mtime)*1000,
-                     'blocked':blocked})
-    return sorted(rows, key=lambda r:r['lastUsed'], reverse=True)
-
-
-def preserve_legacy_exports(data_dir, target):
-    """Migrate legacy Markdown references before deleting their source crops."""
-    data_dir = Path(data_dir)
-    roots = [data_dir/'outputs']
-    registry = data_dir/'work/export-roots.json'
-    if registry.exists():
-        roots += [Path(p) for p in json.loads(registry.read_text('utf-8'))]
-    for output_root in set(roots):
-        if not output_root.exists():
-            continue
-        for report_path in output_root.rglob('*.report.json'):
-            report = json.loads(report_path.read_text('utf-8'))
-            cache = Path(report.get('cache', '')).resolve()
-            if not cache.is_relative_to(target.resolve()):
-                continue
-            markdown = Path(report.get('markdown') or cache/'translated.md')
-            if not markdown.resolve().is_relative_to(target.resolve()) and markdown.is_file():
-                continue  # v0.2 exports already own their assets.
-            if not markdown.is_file():
-                raise ValueError('旧成果缺少 Markdown，无法补齐独立资源，已保留缓存：'+str(report_path))
-            asset_dir = report_path.parent/(report_path.stem+'.assets')
-            asset_dir.mkdir(exist_ok=True)
-            shutil.copyfile(markdown, asset_dir/'translated.md')
-            if (cache/'crops').exists():
-                shutil.copytree(cache/'crops', asset_dir/'crops', dirs_exist_ok=True)
-            if (cache/'document.json').exists():
-                shutil.copyfile(cache/'document.json', asset_dir/'document.json')
-            report['markdown'] = str(asset_dir/'translated.md')
-            report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), 'utf-8')
+    rows.append({
+        'id': ENGINE_ID,
+        'name': ENGINE_LABEL,
+        'source': str(engine),
+        'bytes': tree_size(engine),
+        'lastUsed': int(engine.stat().st_mtime * 1000) if engine.exists() else 0,
+        'blocked': blocked,
+    })
+    return sorted(rows, key=lambda row: row['lastUsed'], reverse=True)
 
 
 def clear_cache(data_dir, identity):
-    if not re.fullmatch('[a-f0-9]{16}', identity):
-        raise ValueError('无效缓存文档标识。')
-    root = root_path(data_dir)
-    target = root/identity
-    if not target.exists():
-        return {'cleared':False, 'id':identity}
-    safe_tree(root, target)
-    preserve_legacy_exports(data_dir, target)
-    safe_tree(root, target)
-    shutil.rmtree(target)
-    return {'cleared':True, 'id':identity}
+    if identity == ENGINE_ID:
+        return _clear_engine_cache()
+    removed = forget(data_dir, identity)
+    return {'cleared': bool(removed), 'id': identity, 'shared': False}
+
+
+def _clear_engine_cache():
+    engine = engine_cache_dir()
+    if not engine.exists():
+        return {'cleared': False, 'id': ENGINE_ID, 'shared': True}
+    if _is_link(engine):
+        raise ValueError('引擎缓存目录是链接，拒绝清理。')
+    _assert_under(engine.parent, engine)
+    if engine.name != 'babeldoc' or engine.parent.name != '.cache':
+        raise ValueError('引擎缓存目录异常，拒绝清理。')
+    _walk_guard(engine)
+    shutil.rmtree(engine)
+    return {'cleared': True, 'id': ENGINE_ID, 'shared': True, 'bytes': 0}

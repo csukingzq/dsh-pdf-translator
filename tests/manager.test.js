@@ -29,7 +29,7 @@ function controlledRunner(){
     run:async(r,c,signal,onProgress)=>{
       calls.push(r);
       if(r.operation==='inspect')return {path:fixture,pages:1,selected_pages:[1]};
-      if(r.operation==='cacheList')return {entries:[{id:'0123456789abcdef',name:'sample.pdf',bytes:1}]};
+      if(r.operation==='cacheList')return {entries:[{id:'engine',name:'翻译引擎共享缓存（BabelDOC）',bytes:1,blocked:''}]};
       if(r.operation==='cacheClear')return {cleared:true};
       progress=onProgress;
       return new Promise((a,b)=>{resolve=a;reject=b;signal?.addEventListener('abort',()=>reject(new Error('cancelled')),{once:true});});
@@ -40,7 +40,8 @@ function readySetup(){
     running:false,
     cancel(){},
     snapshot:()=>({ready:true,running:false,platform:'win32',platformOk:true,phase:'done',message:'',error:'',configError:'',elapsedSeconds:0,log:[],
-      missing:{python:false,runtime:false,config:false,model:false},config:{baseUrl:'https://example.invalid/v1',model:'test',hasApiKey:true}}),
+      missing:{python:false,engine:false,config:false,model:false},engine:{ready:true,version:'2.10.2',error:''},
+      config:{baseUrl:'https://example.invalid/v1',model:'test',hasApiKey:true}}),
     start(){return this.snapshot();},
     saveConfig:input=>({baseUrl:input.baseUrl,model:input.model,hasApiKey:true}),
   };
@@ -53,8 +54,8 @@ test('native Harness job: ownership, progress, duplicate prevention, and chat ca
   const result=await m.start({pdf:fixture},'session-a',{signal:invocation.signal,callId:'nested',rootCallId:'root'});
   await pause();invocation.abort();
   assert.equal(ctx.jobs.get(result.jobId,'session-a').status,'running');
-  runner.progress({phase:'recognizing',completed:1,total:1,cached:1});
-  assert.match(ctx.jobs.get(result.jobId,'session-a').progress,/1\/1/);
+  runner.progress({phase:'translating',stage:'ILTranslator',percent:42,completed:1,total:1});
+  assert.match(ctx.jobs.get(result.jobId,'session-a').progress,/42%/);
   assert.throws(()=>ctx.jobs.get(result.jobId,'session-b'),/another session/);
   assert.equal((await m.start({pdf:fixture},'session-a')).jobId,result.jobId);
   assert.equal((await m.status('session-b')).tasks.length,0);
@@ -62,8 +63,8 @@ test('native Harness job: ownership, progress, duplicate prevention, and chat ca
   await m.settings(path.join(dir,'新的输出目录'));
   assert.equal((await m.status('session-a')).tasks[0].args.outputDir,originalOutput);
   assert.equal(runner.calls.find(r=>r.operation==='translate').outputDir,originalOutput);
-  await assert.rejects(m.prepareClear('0123456789abcdef'),/结束/);
-  runner.complete({output:'translated.pdf',status:'complete'});
+  await assert.rejects(m.prepareClear('engine'),/结束/);
+  runner.complete({output:'translated.pdf',dual:'translated-dual.pdf',status:'complete'});
   await m.pending;await pause();
   assert.equal(ctx.jobs.get(result.jobId,'session-a').status,'completed');
   assert.equal(JSON.parse(ctx.jobs.read(result.jobId,'session-a').result).output,'translated.pdf');
@@ -84,9 +85,9 @@ test('output defaults persist; cache deletion requires a fresh one-use user conf
   const chosen=path.join(dir,'中文 输出');await m.settings(chosen);
   const resolvedChosen=await fs.realpath(chosen);
   assert.equal((await m.status()).outputDir,resolvedChosen);
-  await assert.rejects(m.outputDirectory(path.join(dir,'work/document-cache/nested')),/缓存/);
-  await assert.rejects(m.clear('0123456789abcdef','made-up'),/确认/);
-  const selection=await m.prepareClear('0123456789abcdef');
+  await assert.rejects(m.outputDirectory(path.join(dir,'work/nested')),/工作目录/);
+  await assert.rejects(m.clear('engine','made-up'),/确认/);
+  const selection=await m.prepareClear('engine');
   assert.equal((await m.clear(selection.id,selection.token)).cleared,true);
   await assert.rejects(m.clear(selection.id,selection.token),/确认/);
   const restored=new TranslatorManager(ctx,{dataDir:dir},runner.run,undefined,readySetup());await restored.ready;
@@ -136,7 +137,7 @@ test('one native picker at a time; cancellation preserves settings; disposal abo
 
 test('first-run setup blocks translation, opens the panel and forwards setup/config calls',async t=>{
   const dir=await temp(t),ctx=new Context(),runner=controlledRunner();
-  const snapshot=()=>({...readySetup().snapshot(),ready:false,missing:{python:true,runtime:true,config:false,model:true}});
+  const snapshot=()=>({...readySetup().snapshot(),ready:false,missing:{python:true,engine:true,config:false,model:true}});
   const calls=[];
   const env={...readySetup(),snapshot,
     start:()=>{calls.push('start');return snapshot();},

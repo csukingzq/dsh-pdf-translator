@@ -28,9 +28,8 @@ jobs:
       - name: Install Node dependencies
         run: npm ci
 
-      - name: Prepare PDF translator runtime
-        shell: powershell
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup.ps1 -DataDir "${{ github.workspace }}"
+      - name: Install bridge Python dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
 
       - name: Build client bundle
         run: npm run build

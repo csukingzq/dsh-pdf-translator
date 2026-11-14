@@ -1,3 +1,28 @@
+# 1.0.0 内核替换为 pdf2zh-next / BabelDOC
+
+日期：2026-11-14。**破坏性大版本**：保留面板 UI 与工具入口，替换翻译内核。
+
+### 破坏性变更
+
+- 内核改为 pdf2zh-next 2.x（BabelDOC）：保留原版式的原位翻译，输出 mono（单语译文）与 dual（双语对照）PDF，不再做结构化重建与 LaTeX 排版。
+- 移除 `pdf_review` 工具、面板「AI 核验」开关、`blockEdits`/结构重排/核验事务；同时移除 LaTeX 源码 zip、`markdown`、`document` 结果。
+- `pdf_translate` 参数移除 `imageQuality`、`thinking`、`renderOnly`、`aiReview`；保留 `pdf`、`pages`、`workers`、`outputDir`、`background`。
+- 结果字段变为 `{output, dual, report, status, pages, engine}`；`open` 支持 `output|dual|report`。
+- `config.json` 只保留 `base_url`、`model`、`api_key`，新增可选 `lang_in`、`lang_out`、`qps`；旧 `thinking`、`auto_repair_rounds` 被忽略。
+- 缓存改为共享的 BabelDOC 翻译缓存（`%USERPROFILE%\.cache\babeldoc`），面板只能整体清理；按文档清理记录不再删除任何已导出成果。
+- 移除 `scripts/setup-structure.ps1`、`requirements-structure.txt` 与 BabelDOC/PaddleOCR 可选解析安装。
+
+### 新增与改进
+
+- 新增 `work/engine_host.py`：在独立进程中以 pdf2zh-next 公开 Python API 驱动引擎，进度来自引擎事件而非日志解析；密钥仍只存在 `config.json`，不进入命令行。
+- 新增 `work/engine.py`、`engine_config.py`、`progress.py`、`errors.py`、`outputs.py`、`index.py`、`pages.py`，均可离线单测。
+- 输出目录每次任务新建子目录，内含 `<文件名>-mono.pdf`、`<文件名>-dual.pdf`、`report.json`；文件名截断以避免 Windows 路径超限。
+- 取消会结束引擎与其子进程；错误按鉴权/限流/超时/模型名/上下文/扫描件/缓存占用分类给出可操作提示。
+- 环境就绪改为 `runtime/pdf2zh.json` 标记 + 解释器探测，支持用 `DSH_PDF_PYTHON` 复用已有 pdf2zh-next 环境。
+- 测试：JavaScript 35 项、Python 64 项（纯标准库）覆盖页码范围、配置映射、进度映射、错误分类、产物收集、运行记录与缓存、桥接协议以及独立引擎进程的 JSON 协议（含伪引擎与真实引擎参数校验）。
+
+以下 0.x 记录对应旧内核（AI 视觉识别 + LaTeX 重排），仅作历史保留。
+
 # 0.8.0 数学讲义排版与插件更新
 
 - 修复印刷目录带编号、PDF 书签省略编号时的重复节点。章与第一节同名时按层级、父节点和页码匹配，旧目录节点的人工归属可在离线重排时迁移。

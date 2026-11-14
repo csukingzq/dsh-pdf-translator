@@ -3,13 +3,11 @@ node_modules/
 runtime/
 config.json
 outputs/
-work/document-cache/
-work/review-transactions/
+work/runs.json
 work/plugin-state.json
-work/export-roots.json
+work/__pycache__/
 .translation.lock
 verification/native-picker/
-verification/live/work/
 __pycache__/
 *.pyc
 *.tgz

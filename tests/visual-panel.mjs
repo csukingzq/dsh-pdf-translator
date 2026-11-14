@@ -7,8 +7,8 @@ const result=await build({stdin:{contents:`
 import React from 'react';import {createRoot} from 'react-dom/client';import {Panel,createPanelState} from './src/client.jsx';import css from './src/panel.css';
 const style=document.createElement('style');style.textContent=css;document.head.append(style);
 const store=createPanelState();store.set({sessionId:'test'});
-let task=null;window.fixture={store,start(){task={id:'preview',args:{pdf:'D:/资料/有限元特征值问题研究.pdf'},status:'running',progress:{phase:'recognizing',completed:7,total:23}};},compile(){task.progress.phase='compiling';},finish(){task=null;}};
-const call=async r=>{if(r.action==='status')return {tasks:task?[task]:[],outputDir:'D:/中文输出',configured:true,busy:!!task};if(r.action==='pick')return {cancelled:false,path:'D:/资料/有限元特征值问题研究.pdf'};if(r.action==='inspect')return {path:r.pdf,pages:23,bytes:4096};if(r.action==='caches')return {entries:[{id:'0123456789abcdef',name:'有限元特征值问题研究.pdf',bytes:4256000,busy:!!task}],cleaningDisabled:!!task};throw Error(r.action);};
+let task=null;window.fixture={store,start(){task={id:'preview',args:{pdf:'D:/资料/有限元特征值问题研究.pdf'},status:'running',progress:{phase:'translating',stage:'ILTranslator',percent:30,completed:7,total:23}};},compile(){task.progress.phase='typesetting';task.progress.percent=90;},finish(){task=null;}};
+const call=async r=>{if(r.action==='status')return {tasks:task?[task]:[],outputDir:'D:/中文输出',configured:true,busy:!!task};if(r.action==='pick')return {cancelled:false,path:'D:/资料/有限元特征值问题研究.pdf'};if(r.action==='inspect')return {path:r.pdf,pages:23,bytes:4096};if(r.action==='caches')return {entries:[{id:'engine',name:'翻译引擎共享缓存（BabelDOC）',bytes:4256000,blocked:''}],cleaningDisabled:!!task};throw Error(r.action);};
 createRoot(document.getElementById('app')).render(React.createElement(Panel,{store,call}));
 `,resolveDir:process.cwd(),loader:'jsx'},bundle:true,write:false,format:'iife',platform:'browser',loader:{'.css':'text'}});
 await mkdir('verification',{recursive:true});
@@ -25,8 +25,8 @@ try{
   const saved=await entry.boundingBox();
   await entry.click();assert.equal(await entry.isVisible(),false);
   const initial=await panel.boundingBox();assert.equal(initial.x,saved.x);assert.equal(initial.y,saved.y);assert.equal(initial.width,240);
-  assert.equal(await panel.locator('.pdf-actions button').count(),3);
-  assert.equal(await panel.locator('input,select,details').count(),1);
+  assert.equal(await panel.locator('.pdf-actions button').count(),4);
+  assert.equal(await panel.locator('input,select,details').count(),0);
   assert.equal(await panel.evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(255, 255, 255)');
   await page.screenshot({path:'verification/panel-desktop.png'});
   await drag(page.locator('.pdf-panel header'),350,-100);
@@ -40,10 +40,10 @@ try{
   await page.getByLabel('翻译页码').fill('1,3,5-8');assert.equal(await page.getByRole('button',{name:'开始翻译'}).isEnabled(),true);
   await page.screenshot({path:'verification/panel-confirmation.png'});
   await page.keyboard.press('Escape');await dialog.waitFor({state:'hidden'});
-  await page.evaluate(()=>window.fixture.start());await page.getByText('7/23 页',{exact:true}).waitFor();
+  await page.evaluate(()=>window.fixture.start());await page.getByText('30% · 7/23 段',{exact:true}).waitFor();
   await page.screenshot({path:'verification/panel-progress.png'});
-  await page.evaluate(()=>window.fixture.compile());await page.getByText('编译 PDF · 进行中').waitFor();
-  assert.equal(await page.locator('progress').getAttribute('value'),null);
+  await page.evaluate(()=>window.fixture.compile());await page.getByText('排版生成 PDF · ILTranslator').waitFor();
+  assert.equal(await page.locator('progress').getAttribute('value'),'90');
   await page.emulateMedia({colorScheme:'dark'});
   assert.equal(await panel.evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(32, 36, 44)');
   await page.screenshot({path:'verification/panel-dark.png'});
@@ -53,12 +53,12 @@ try{
   await page.waitForFunction(()=>{const b=document.querySelector('.pdf-panel').getBoundingClientRect();return b.right<=innerWidth&&b.bottom<=innerHeight;});
   await page.screenshot({path:'verification/panel-narrow.png'});
   await page.getByRole('button',{name:'清理缓存',exact:true}).click();await page.getByRole('dialog',{name:'清理缓存'}).waitFor();
-  assert.equal(await page.getByRole('button',{name:'清理该文档缓存'}).isEnabled(),false);
+  assert.equal(await page.getByRole('button',{name:'清理引擎缓存'}).isEnabled(),false);
   assert.ok(await page.locator('.pdf-dialog').evaluate(el=>el.getBoundingClientRect().right<=innerWidth));
   await page.screenshot({path:'verification/panel-cache.png'});await page.keyboard.press('Escape');
   await page.getByRole('button',{name:'收起'}).click();await drag(entry,1000,1000);let b=await entry.boundingBox();assert.ok(b.x+b.width<=260&&b.y+b.height<=420);
   await boot();assert.equal((await entry.boundingBox()).x,b.x);assert.equal((await entry.boundingBox()).y,b.y);
   await entry.click();await drag(page.locator('.pdf-panel header'),-1000,-1000);b=await panel.boundingBox();assert.ok(b.x>=12&&b.y>=48);
   assert.deepEqual(errors,[]);
-  console.log('Visual checks passed: opaque light/dark backgrounds, 240px panel, 260px viewport, entry anchoring/restoration, drag, keyboard, saved entry, confirmation/Escape, progress and indeterminate compilation, protected cache dialog.');
+  console.log('Visual checks passed: opaque light/dark backgrounds, 240px panel, 260px viewport, entry anchoring/restoration, drag, keyboard, saved entry, confirmation/Escape, determinate progress across phases, protected cache dialog.');
 }finally{await browser.close();}

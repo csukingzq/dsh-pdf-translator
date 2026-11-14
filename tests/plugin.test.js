@@ -17,12 +17,15 @@ test('Cordis registers native tools, validates inputs and disposes registrations
   await new Promise(resolve => setTimeout(resolve, 30));
   const registry = ctx.get('tools');
   assert.ok(registry.get('pdf_translate'));
+  assert.equal(registry.get('pdf_review'), undefined);
   assert.ok(ctx.get('pdfTranslator'));
   assert.ok(ctx.typert.local.get('pdfTranslator/call'));
   const signal = new AbortController().signal;
   const doctor = await registry.execute({ callId: 'doctor-1', name: 'pdf_translator_doctor', arguments: {}, signal });
   assert.equal(doctor.isError, false, JSON.stringify(doctor));
-  assert.equal(doctor.value.local_ocr, false);
+  assert.equal(doctor.value.engine.name, 'pdf2zh-next');
+  assert.equal(typeof doctor.value.pymupdf, 'string');
+  assert.equal(typeof doctor.value.model_configured, 'boolean');
   const inspect = await registry.execute({ callId: 'inspect-1', name: 'pdf_inspect',
     arguments: { pdf: path.join(root, 'tests/fixtures/vision-sample.pdf') }, signal });
   assert.equal(inspect.isError, false, JSON.stringify(inspect));

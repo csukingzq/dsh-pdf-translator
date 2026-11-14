@@ -3,8 +3,6 @@ param(
     [string]$DataDir = '',
     [switch]$Force,
     [switch]$OfficialOnly,
-    [string]$TectonicUrl = 'https://github.com/tectonic-typesetting/tectonic/releases/download/tectonic%400.17.0/tectonic-0.17.0-x86_64-pc-windows-msvc.zip',
-    [string]$PandocUrl = 'https://github.com/jgm/pandoc/releases/download/3.12.1/pandoc-3.12.1-windows-x86_64.zip',
     [string[]]$PipIndexUrls = @('https://pypi.tuna.tsinghua.edu.cn/simple', 'https://mirrors.aliyun.com/pypi/simple/'),
     [string]$PipFallbackIndexUrl = 'https://pypi.org/simple'
 )
@@ -16,20 +14,6 @@ try {
 } catch {}
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}
 $projectRoot = Split-Path $PSScriptRoot -Parent
-
-# GitHub Releases are unreliable from mainland China. Try these public GitHub
-# download proxies first and fall back to the official URL. Pass -OfficialOnly
-# to skip the mirrors.
-$script:MirrorPrefixes = @('https://ghproxy.net/', 'https://gh-proxy.com/', 'https://ghfast.top/')
-
-function Get-CandidateUrls {
-    param([string]$Url)
-    if ($OfficialOnly -or $Url -notmatch '^https://github\.com/') { return @($Url) }
-    $urls = @()
-    foreach ($prefix in $script:MirrorPrefixes) { $urls += ($prefix + $Url) }
-    $urls += $Url
-    return $urls
-}
 
 function Resolve-DataDir {
     param([string]$Requested)
@@ -45,7 +29,7 @@ function Resolve-DataDir {
 
 function Test-PythonVersion {
     param([string]$Exe, [string[]]$Arguments = @())
-    & $Exe @Arguments -c "import sys; raise SystemExit(0 if sys.version_info >= (3,10) else 1)" 2>$null | Out-Null
+    & $Exe @Arguments -c "import sys; raise SystemExit(0 if (3,10) <= sys.version_info[:2] < (3,14) else 1)" 2>$null | Out-Null
     return $LASTEXITCODE -eq 0
 }
 
@@ -66,42 +50,7 @@ function Find-BasePython {
     foreach ($candidate in $candidates) {
         if (Test-PythonVersion -Exe $candidate.Exe -Arguments $candidate.Args) { return $candidate }
     }
-    throw 'Python 3.10+ is required. Install Python or use the Python runtime bundled with DSH Desktop.'
-}
-
-function Install-ZipPackage {
-    param([string]$Name, [string[]]$Urls, [string]$Destination, [string]$ExeName)
-    $existing = Get-ChildItem -LiteralPath $Destination -Filter $ExeName -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($existing) {
-        Write-Host "$Name already installed: $($existing.FullName)"
-        return
-    }
-    New-Item -ItemType Directory -Path $Destination -Force | Out-Null
-    $errors = @()
-    for ($index = 0; $index -lt $Urls.Count; $index++) {
-        $url = $Urls[$index]
-        $official = ($index -eq $Urls.Count - 1) -and ($url -match '^https://github\.com/')
-        $timeout = if ($official) { 600 } else { 240 }
-        $archive = Join-Path ([IO.Path]::GetTempPath()) ("dsh-pdf-$Name-" + [guid]::NewGuid().ToString('N') + '.zip')
-        try {
-            Write-Host "Downloading $Name from $url ..."
-            Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $archive -TimeoutSec $timeout
-            Expand-Archive -LiteralPath $archive -DestinationPath $Destination -Force
-            $installed = Get-ChildItem -LiteralPath $Destination -Filter $ExeName -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
-            if (-not $installed) { throw "$ExeName was not found after extraction" }
-            Write-Host "$Name installed: $($installed.FullName)"
-            return
-        } catch {
-            $errors += "$url -> $($_.Exception.Message)"
-            Write-Host "Download failed: $($_.Exception.Message)"
-            Remove-Item -LiteralPath $Destination -Recurse -Force -ErrorAction SilentlyContinue
-            New-Item -ItemType Directory -Path $Destination -Force | Out-Null
-        } finally {
-            if (Test-Path -LiteralPath $archive) { Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue }
-        }
-    }
-    throw ("Failed to download or extract $Name. Tried:`n  " + ($errors -join "`n  ") +
-        "`nCheck the network or proxy, retry, or download manually: " + ($Urls -join ', '))
+    throw '需要 Python 3.10–3.13。请安装 Python，或使用 DSH 桌面版自带的 Python。'
 }
 
 $DataDir = Resolve-DataDir -Requested $DataDir
@@ -110,6 +59,7 @@ $venvDir = Join-Path $DataDir '.venv'
 $venvPython = Join-Path $venvDir 'Scripts\python.exe'
 $runtimeDir = Join-Path $DataDir 'runtime'
 $configPath = Join-Path $DataDir 'config.json'
+New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
 
 if ($Force -and (Test-Path -LiteralPath $venvDir)) {
     Write-Host "Recreating Python environment: $venvDir"
@@ -122,19 +72,8 @@ if (-not (Test-Path -LiteralPath $venvPython)) {
     Write-Host "Creating Python environment with $($base.Exe) ..."
     & $base.Exe @baseArgs -m venv $venvDir
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $venvPython)) {
-        throw "Failed to create the Python environment. Verify Python 3.10+: $($base.Exe)"
+        throw "无法创建 Python 环境。请确认 Python 3.10–3.13：$($base.Exe)"
     }
-}
-
-function Invoke-PipInstall {
-    param([string]$IndexUrl)
-    $pipArgs = @('-m', 'pip', 'install', '--disable-pip-version-check', '--no-input', '--timeout', '30', '--retries', '2')
-    if ($IndexUrl) { $pipArgs += @('-i', $IndexUrl) }
-    $pipArgs += @('-r', (Join-Path $projectRoot 'requirements.txt'))
-    $label = if ($IndexUrl) { $IndexUrl } else { 'the default pip index' }
-    Write-Host "Installing Python dependencies via $label ..."
-    & $venvPython @pipArgs | Out-Host
-    return $LASTEXITCODE
 }
 
 $pipIndexes = @()
@@ -142,19 +81,52 @@ if (-not $OfficialOnly) { $pipIndexes += $PipIndexUrls }
 if ($PipFallbackIndexUrl) { $pipIndexes += $PipFallbackIndexUrl }
 $pipIndexes = @($pipIndexes | Where-Object { $_ } | Select-Object -Unique)
 
-$pipExit = 1
-foreach ($pipIndex in $pipIndexes) {
-    $pipExit = Invoke-PipInstall -IndexUrl $pipIndex
-    if ($pipExit -eq 0) { break }
-    if ($pipIndex -ne $pipIndexes[-1]) { Write-Host "pip mirror failed, trying the next source ..." }
+function Invoke-PipInstall {
+    param([string]$Label, [string]$Requirements, [string]$IndexUrl)
+    $pipArgs = @('-m', 'pip', 'install', '--disable-pip-version-check', '--no-input', '--timeout', '60', '--retries', '3')
+    if ($IndexUrl) { $pipArgs += @('-i', $IndexUrl) }
+    $pipArgs += @('-r', $Requirements)
+    $source = if ($IndexUrl) { $IndexUrl } else { 'the default pip index' }
+    Write-Host "$Label via $source ..."
+    & $venvPython @pipArgs | Out-Host
+    return $LASTEXITCODE
 }
-if ($pipIndexes.Count -eq 0) { $pipExit = Invoke-PipInstall }
-if ($pipExit -ne 0) { throw 'Python dependency installation failed. Check the network or pip configuration.' }
-& $venvPython -c "import pymupdf, bs4" 2>$null
+
+function Install-Requirements {
+    param([string]$Label, [string]$Requirements)
+    $exit = 1
+    foreach ($pipIndex in $pipIndexes) {
+        $exit = Invoke-PipInstall -Label $Label -Requirements $Requirements -IndexUrl $pipIndex
+        if ($exit -eq 0) { return }
+        if ($pipIndex -ne $pipIndexes[-1]) { Write-Host 'pip mirror failed, trying the next source ...' }
+    }
+    if ($pipIndexes.Count -eq 0) { $exit = Invoke-PipInstall -Label $Label -Requirements $Requirements }
+    if ($exit -ne 0) { throw "$Label failed. Check the network or pip configuration." }
+}
+
+$engineRequirements = Join-Path $projectRoot 'requirements-engine.txt'
+$requiresEngine = Test-Path -LiteralPath $engineRequirements
+
+Install-Requirements -Label 'Installing Python dependencies' -Requirements (Join-Path $projectRoot 'requirements.txt')
+& $venvPython -c "import pymupdf, pypdf" 2>$null
 if ($LASTEXITCODE -ne 0) { throw 'Python dependencies are not importable after installation.' }
 
-Install-ZipPackage -Name 'tectonic' -Urls (Get-CandidateUrls $TectonicUrl) -Destination (Join-Path $runtimeDir 'tectonic') -ExeName 'tectonic.exe'
-Install-ZipPackage -Name 'pandoc' -Urls (Get-CandidateUrls $PandocUrl) -Destination (Join-Path $runtimeDir 'pandoc') -ExeName 'pandoc.exe'
+if ($requiresEngine) {
+    $installedVersion = (& $venvPython -c "import importlib.metadata as m; print(m.version('pdf2zh-next'))" 2>$null)
+    if ($LASTEXITCODE -ne 0 -or -not $installedVersion) {
+        Install-Requirements -Label 'Installing the translation engine' -Requirements $engineRequirements
+    } else {
+        Write-Host "pdf2zh-next already installed: $installedVersion"
+    }
+    & $venvPython -c "import pymupdf, pypdf, pdf2zh_next" 2>$null
+    if ($LASTEXITCODE -ne 0) { throw 'The translation engine is not importable after installation.' }
+    $installedVersion = (& $venvPython -c "import importlib.metadata as m; print(m.version('pdf2zh-next'))").Trim()
+    @{
+        version = $installedVersion
+        python = $venvPython
+        installedAt = (Get-Date).ToString('o')
+    } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $runtimeDir 'pdf2zh.json') -Encoding utf8
+}
 
 $createdConfig = $false
 if ((-not (Test-Path -LiteralPath $configPath)) -or ((Get-Item -LiteralPath $configPath).Length -eq 0)) {
@@ -168,6 +140,6 @@ Write-Host "  Data directory: $DataDir"
 Write-Host "  Python:         $venvPython"
 Write-Host "  Config:         $configPath"
 if ($createdConfig) {
-    Write-Host 'Edit config.json and set base_url, model and api_key for a vision-capable API.'
+    Write-Host 'Edit config.json and set base_url, model and api_key.'
 }
 Write-Host 'Restart or reload Harness, then run pdf_translator_doctor in a chat.'

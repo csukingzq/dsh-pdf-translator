@@ -7,22 +7,22 @@ const PLACEHOLDER_MODEL = /^REPLACE/i;
 const MAX_LOG_LINES = 200;
 const MAX_LINE_LENGTH = 500;
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
-const DEFAULT_CONFIG = { thinking: 'auto', auto_repair_rounds: 3 };
+const PROBE_TIMEOUT_MS = 20000;
+const DEFAULT_CONFIG = {};
 const PHASE_TEXT = {
   starting: '正在启动环境安装…',
   python: '创建 Python 环境…',
   dependencies: '安装 Python 依赖…',
-  tectonic: '下载 Tectonic…',
-  pandoc: '下载 Pandoc…',
+  engine: '安装翻译引擎（pdf2zh-next）…',
   done: '环境已就绪',
 };
 const PHASE_RULES = [
   [/Creating Python environment/i, 'python'],
   [/Installing Python dependencies/i, 'dependencies'],
-  [/Downloading tectonic/i, 'tectonic'],
-  [/Downloading pandoc/i, 'pandoc'],
+  [/Installing the translation engine/i, 'engine'],
   [/PDF translator environment is ready/i, 'done'],
 ];
+const PROBE_CODE = "import importlib.metadata as m; print(m.version('pdf2zh-next'))";
 
 const existsFile = (file) => {
   try { return fs.statSync(file).isFile(); } catch { return false; }
@@ -32,19 +32,6 @@ function defaultPowerShell() {
   const systemRoot = process.env.SystemRoot || 'C:\\Windows';
   const candidate = path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
   return existsFile(candidate) ? candidate : '';
-}
-
-function findPandoc(runtimeDir) {
-  const folder = path.join(runtimeDir, 'pandoc');
-  let names = [];
-  try { names = fs.readdirSync(folder); } catch { return ''; }
-  for (const name of names) {
-    const candidate = path.join(folder, name, 'pandoc.exe');
-    if (existsFile(candidate)) return candidate;
-    if (existsFile(path.join(folder, 'pandoc.exe'))) return path.join(folder, 'pandoc.exe');
-  }
-  const direct = path.join(folder, 'pandoc.exe');
-  return existsFile(direct) ? direct : '';
 }
 
 function phaseFor(line) {
@@ -58,11 +45,13 @@ export class SetupController {
     this.platform = options.platform || process.platform;
     this.dataDir = path.resolve(options.dataDir || resolveDataDir(config));
     this.configPath = path.resolve(options.configPath || resolveConfigPath(config, this.dataDir));
+    this.runtimeDir = path.resolve(options.runtimeDir || resolveRuntimeDir(config, this.dataDir));
     this.scriptPath = options.scriptPath || path.join(root, 'scripts', 'setup.ps1');
     this.spawn = options.spawnProcess || spawn;
     this.powershell = options.powershellPath === undefined ? defaultPowerShell() : options.powershellPath;
     this.now = options.now || Date.now;
     this.timeoutMs = options.timeoutMs || DEFAULT_TIMEOUT_MS;
+    this.allowProbe = options.probe !== false;
     this.running = false;
     this.phase = 'idle';
     this.message = '';
@@ -74,6 +63,91 @@ export class SetupController {
     this.cancelled = false;
     this.timer = null;
     this.timedOut = '';
+    this.engine = { ready: false, version: '', error: '', probed: false };
+    this.probed = null;
+  }
+
+  markerPath() {
+    return path.join(this.runtimeDir, 'pdf2zh.json');
+  }
+
+  marker() {
+    try {
+      const value = JSON.parse(fs.readFileSync(this.markerPath(), 'utf8'));
+      return { version: typeof value.version === 'string' ? value.version : '' };
+    } catch {
+      return { version: '' };
+    }
+  }
+
+  pythonPath() {
+    return resolvePythonPath(this.config, this.dataDir);
+  }
+
+  hasPython() {
+    const venvPython = path.join(this.dataDir, '.venv', 'Scripts', 'python.exe');
+    const configured = this.pythonPath();
+    return existsFile(venvPython) || (path.isAbsolute(configured) && existsFile(configured));
+  }
+
+  // Cheap readiness probe: the setup script's marker first, then one spawn of
+  // the configured interpreter so an existing engine environment works too.
+  prime() {
+    if (this.probed) return this.probed;
+    this.probed = this.probe().catch(() => {}).finally(() => { this.probed = null; });
+    return this.probed;
+  }
+
+  async probe() {
+    const marker = this.marker();
+    if (marker.version) {
+      this.engine = { ready: true, version: marker.version, error: '', probed: true };
+      return this.engine;
+    }
+    if (!this.allowProbe) {
+      this.engine = { ready: false, version: '', error: '', probed: false };
+      return this.engine;
+    }
+    const python = this.pythonPath();
+    if (path.isAbsolute(python) && !existsFile(python)) {
+      this.engine = { ready: false, version: '', error: 'Python 环境不存在：' + python, probed: true };
+      return this.engine;
+    }
+    let result;
+    try {
+      result = await this.exec(python, ['-c', PROBE_CODE]);
+    } catch (error) {
+      this.engine = { ready: false, version: '', error: '无法运行 Python：' + error.message, probed: true };
+      return this.engine;
+    }
+    const version = String(result.out || '').trim().split('\n').pop().trim();
+    if (result.code === 0 && /^\d+\.\d+/.test(version)) {
+      this.engine = { ready: true, version, error: '', probed: true };
+    } else {
+      this.engine = { ready: false, version: '', error: '未安装 pdf2zh-next 翻译引擎。', probed: true };
+    }
+    return this.engine;
+  }
+
+  exec(command, args) {
+    return new Promise((resolve) => {
+      let child;
+      try {
+        child = this.spawn(command, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      } catch (error) {
+        resolve({ code: -1, out: '', err: error.message });
+        return;
+      }
+      let out = '', err = '';
+      const timer = setTimeout(() => { try { child.kill?.(); } catch {} }, PROBE_TIMEOUT_MS);
+      timer.unref?.();
+      child.stdout?.setEncoding?.('utf8');
+      child.stderr?.setEncoding?.('utf8');
+      child.stdout?.on?.('data', (chunk) => { out += chunk; });
+      child.stderr?.on?.('data', (chunk) => { err += chunk; });
+      child.on?.('error', (error) => { clearTimeout(timer); resolve({ code: -1, out, err: error.message }); });
+      child.on?.('close', (code) => { clearTimeout(timer); resolve({ code: code === null ? -1 : code, out, err }); });
+    });
   }
 
   readConfigFile() {
@@ -105,7 +179,7 @@ export class SetupController {
     if (!/^https?:\/\/[^\s/]+/i.test(baseUrl)) throw new Error('接口地址必须以 http:// 或 https:// 开头。');
     const model = String(input.model || '').trim();
     if (!model) throw new Error('请填写模型名称。');
-    if (PLACEHOLDER_MODEL.test(model)) throw new Error('请把示例模型名替换成支持图片输入的真实模型。');
+    if (PLACEHOLDER_MODEL.test(model)) throw new Error('请把示例模型名替换成真实的模型。');
     const file = this.readConfigFile();
     if (file.error) throw new Error(file.error + ' 请修复或删除后重试。');
     const current = file.value || { ...DEFAULT_CONFIG };
@@ -122,22 +196,26 @@ export class SetupController {
 
   snapshot() {
     const platformOk = this.platform === 'win32';
-    const venvPython = path.join(this.dataDir, '.venv', 'Scripts', 'python.exe');
-    const configuredPython = resolvePythonPath(this.config, this.dataDir);
-    const python = existsFile(venvPython) || (path.isAbsolute(configuredPython) && existsFile(configuredPython));
-    const runtimeDir = resolveRuntimeDir(this.config, this.dataDir);
-    const runtime = existsFile(path.join(runtimeDir, 'tectonic', 'tectonic.exe')) && Boolean(findPandoc(runtimeDir));
+    const python = this.hasPython();
+    // The setup script's marker is the fast, synchronous readiness signal;
+    // prime() adds interpreter probing for externally provided environments.
+    const marker = this.marker();
+    const engine = {
+      ready: Boolean(marker.version) || this.engine.ready === true,
+      version: marker.version || this.engine.version || '',
+      error: marker.version ? '' : (this.engine.error || ''),
+    };
     const file = this.readConfigFile();
     const value = file.value || {};
     const baseUrl = typeof value.base_url === 'string' ? value.base_url.trim() : '';
     const model = typeof value.model === 'string' ? value.model.trim() : '';
     const hasApiKey = Boolean(value.api_key);
     const modelReady = /^https?:\/\//i.test(baseUrl) && Boolean(model) && !PLACEHOLDER_MODEL.test(model) && hasApiKey;
-    const missing = { python: !python, runtime: !runtime, config: !file.exists, model: !modelReady };
+    const missing = { python: !python, engine: !engine.ready, config: !file.exists, model: !modelReady };
     return {
       platform: this.platform,
       platformOk,
-      ready: platformOk && !missing.python && !missing.runtime && !missing.model,
+      ready: platformOk && !missing.python && !missing.engine && !missing.model,
       running: this.running,
       phase: this.phase,
       message: this.message,
@@ -146,6 +224,7 @@ export class SetupController {
       elapsedSeconds: this.running && this.startedAt ? Math.max(0, Math.round((this.now() - this.startedAt) / 1000)) : 0,
       log: this.log.slice(-6),
       missing,
+      engine,
       config: {
         baseUrl,
         model,
@@ -272,6 +351,8 @@ export class SetupController {
     } else if (code === 0) {
       this.phase = 'done';
       this.message = PHASE_TEXT.done;
+      this.engine = { ready: false, version: '', error: '', probed: false };
+      void this.prime();
     } else {
       const tail = this.log.filter(Boolean).slice(-3).join(' ');
       this.phase = 'failed';

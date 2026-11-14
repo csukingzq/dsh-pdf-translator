@@ -1,5 +1,11 @@
-"""JSON stdin/stdout bridge. Progress goes to stderr; secrets never enter argv."""
+"""JSON stdin/stdout bridge for the DeepSeek Harness plugin.
+
+Progress and results are JSON lines on stdout; everything else (engine logs,
+warnings, tracebacks) is redirected to stderr. Secrets stay in ``config.json``
+and are only read by the engine host process.
+"""
 import contextlib
+import hashlib
 import json
 import os
 import sys
@@ -11,7 +17,7 @@ ROOT = Path(__file__).resolve().parent.parent
 @contextlib.contextmanager
 def exclusive(data_dir):
     data_dir.mkdir(parents=True, exist_ok=True)
-    handle = (data_dir/'.translation.lock').open('a+b')
+    handle = (data_dir / '.translation.lock').open('a+b')
     try:
         if os.name == 'nt':
             import msvcrt
@@ -23,7 +29,7 @@ def exclusive(data_dir):
             msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
         else:
             import fcntl
-            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
         handle.close()
         raise RuntimeError('此输出目录已有翻译任务运行；请等待完成或更换 dataDir。') from None
@@ -34,91 +40,208 @@ def exclusive(data_dir):
 
 
 def load_config(path):
-    cfg = json.loads(Path(path).read_text('utf-8-sig')) if Path(path).exists() else {}
-    for field, env in [('api_key','DSH_PDF_API_KEY'), ('base_url','DSH_PDF_BASE_URL'), ('model','DSH_PDF_MODEL')]:
-        if os.environ.get(env):
-            cfg[field] = os.environ[env]
-    return cfg
+    """Read config.json with DSH_PDF_* environment overrides."""
+    import engine_config
+    return engine_config.load_config(path)
 
 
-def execute(request, on_progress=None):
-    operation = request.get('operation', 'translate')
-    if operation in {'review','reviewRecover'}:
-        from review_pipeline import execute as review, recover
-        data_dir = Path(request.get('dataDir') or ROOT).resolve()
-        with exclusive(data_dir):
-            return recover(data_dir) if operation == 'reviewRecover' else review(request)
-    if operation in {'cacheList', 'cacheClear'}:
-        from cache_ops import cache_list, clear_cache
-        data_dir = Path(request.get('dataDir') or ROOT).resolve()
-        if operation == 'cacheList':
-            return {'entries':cache_list(data_dir)}
-        with exclusive(data_dir):
-            return clear_cache(data_dir, request['identity'])
+def engine_version():
+    try:
+        from importlib.metadata import version
+        return version('pdf2zh-next')
+    except Exception:
+        return ''
+
+
+def pymupdf_version():
+    try:
+        import pymupdf
+        return pymupdf.__version__
+    except Exception:
+        return ''
+
+
+def doctor(request, data_dir, config_path):
+    cfg = load_config(config_path)
+    version = engine_version()
+    return {
+        'python': sys.executable,
+        'engine': {
+            'name': 'pdf2zh-next',
+            'ready': bool(version),
+            'version': version,
+            'module_ready': _module_ready(),
+        },
+        'pymupdf': pymupdf_version(),
+        'model_configured': _model_configured(cfg),
+        'plugin_root': str(ROOT),
+        'data_dir': str(data_dir),
+        'config_path': str(config_path.resolve()),
+        'engine_cache_dir': str(_engine_cache_dir()),
+        'runtime_dir': os.environ.get('DSH_PDF_RUNTIME_DIR') or str(ROOT / 'runtime'),
+    }
+
+
+def _module_ready():
+    import importlib.util
+    try:
+        return importlib.util.find_spec('pdf2zh_next') is not None
+    except Exception:
+        return False
+
+
+def _model_configured(cfg):
+    import engine_config
+    return engine_config.configured(cfg)
+
+
+def _engine_cache_dir():
+    import cache_ops
+    return cache_ops.engine_cache_dir()
+
+
+def inspect(request):
     import pymupdf
-    import bs4  # Verify the renderer's HTML dependency before any model request.
-    from latex_renderer import binaries
-    from document_pipeline import page_indices, run_document
-    operation = request.get('operation', 'translate')
-    if operation == 'doctor':
-        try:
-            pandoc, tectonic = binaries()
-            renderer = {'ready':True, 'pandoc':pandoc, 'tectonic':tectonic}
-        except RuntimeError as exc:
-            renderer = {'ready':False, 'error':str(exc)}
-        config_path = Path(request.get('configPath') or ROOT/'config.json')
-        cfg = load_config(config_path)
-        data_dir = Path(request.get('dataDir') or ROOT).resolve()
-        return {'python':sys.executable, 'pymupdf':pymupdf.__version__, 'renderer':renderer,
-                'model_configured':bool(cfg.get('api_key') and cfg.get('model') and cfg.get('base_url')),
-                'recognition':'structured-vision', 'local_ocr':bool(cfg.get('structure_python')),
-                'structure_worker_configured':bool(cfg.get('structure_python')),
-                'plugin_root':str(ROOT), 'data_dir':str(data_dir), 'config_path':str(config_path.resolve()),
-                'runtime_dir':os.environ.get('DSH_PDF_RUNTIME_DIR') or str(ROOT/'runtime')}
+    import pages
     source = Path(request['pdf']).expanduser().resolve()
     if not source.is_file() or source.suffix.lower() != '.pdf':
         raise ValueError('找不到指定的 PDF 文件。')
     with pymupdf.open(source) as doc:
         if doc.needs_pass:
             raise ValueError('请先解密 PDF。')
-        indices = page_indices(request.get('pages') or 'all', len(doc))
-        if operation == 'inspect':
-            return {'path':str(source), 'pages':len(doc), 'selected_pages':[i+1 for i in indices],
-                    'bytes':source.stat().st_size}
-    if operation != 'translate':
-        raise ValueError('未知操作。')
-    cfg = load_config(request.get('configPath') or ROOT/'config.json')
-    if not cfg.get('base_url') or not cfg.get('model') or (not request.get('renderOnly') and not cfg.get('api_key')):
-        raise ValueError('请在 config.json 或 DSH_PDF_* 环境变量中配置支持图片输入的模型服务。')
-    binaries()  # Fail before spending tokens if the compiler is unavailable.
-    data_dir = Path(request.get('dataDir') or ROOT).expanduser().resolve()
+        count = len(doc)
+    indices = pages.page_indices(request.get('pages') or 'all', count)
+    return {
+        'path': str(source),
+        'pages': count,
+        'selected_pages': [index + 1 for index in indices],
+        'bytes': source.stat().st_size,
+    }
+
+
+def translate(request, data_dir, config_path, on_progress):
+    import engine
+    import engine_config
+    import index
+    import outputs
+    import pages
+    import pymupdf
+
+    source = Path(request['pdf']).expanduser().resolve()
+    if not source.is_file() or source.suffix.lower() != '.pdf':
+        raise ValueError('找不到指定的 PDF 文件。')
+    with pymupdf.open(source) as doc:
+        if doc.needs_pass:
+            raise ValueError('请先解密 PDF。')
+        count = len(doc)
+    indices = pages.page_indices(request.get('pages') or 'all', count)
+    if not indices:
+        raise ValueError('PDF 没有可处理的页面。')
+    selected = pages.normalize(request.get('pages') or 'all', count)
+
+    cfg = load_config(config_path)
+    model = engine_config.model_config(cfg)
+    engine_config.workers(request)
+    version = engine_version()
+    if not version:
+        raise ValueError('未安装 pdf2zh-next 翻译引擎，请打开 PDF 翻译面板点击“一键准备环境”。')
+
+    output_dir = Path(request.get('outputDir') or (data_dir / 'outputs')).expanduser().resolve()
+    cache_root = (data_dir / 'work').resolve()
+    if output_dir == cache_root or output_dir.is_relative_to(cache_root):
+        raise ValueError('输出目录不能位于插件工作目录内。')
+    identity = hashlib.sha256(source.read_bytes()).hexdigest()[:16]
+
     with exclusive(data_dir):
-        return run_document(source, request.get('pages') or 'all', cfg,
-            workers=request.get('workers', 4), render_only=request.get('renderOnly', False),
-            image_quality=request.get('imageQuality', 'safe'), thinking=request.get('thinking'), data_dir=data_dir,
-            output_dir=request.get('outputDir'), on_progress=on_progress)
+        prepared = outputs.prepare(output_dir, source)
+        try:
+            result = engine.run({
+                'configPath': str(config_path),
+                'input': str(prepared['input']),
+                'run_dir': str(prepared['run_dir']),
+                'engine_dir': str(prepared['engine_dir']),
+                'pages': selected,
+                'workers': request.get('workers'),
+            }, on_progress)
+            collected = outputs.collect(prepared, result, {
+                'source': str(source),
+                'pages': selected,
+                'selected_pages': len(indices),
+                'model': model['model'],
+                'base_url': model['base_url'],
+            })
+        except BaseException:
+            # Do not leave a full PDF copy behind for a failed run.
+            outputs.discard(prepared)
+            raise
+        index.record(data_dir, {
+            'identity': identity,
+            'source': str(source),
+            'name': source.name,
+            'runDir': str(prepared['run_dir']),
+            'output': collected['output'],
+            'dual': collected['dual'],
+            'pages': selected,
+            'bytes': collected['bytes'],
+        })
+    return {
+        'output': collected['output'],
+        'dual': collected['dual'],
+        'report': collected['report'],
+        'pages': len(indices),
+        'selected_pages': [index + 1 for index in indices],
+        'status': 'complete',
+        'engine': 'pdf2zh-next',
+        'engine_version': version,
+        'source': str(source),
+        'output_dir': str(prepared['run_dir']),
+        'seconds': result.get('seconds'),
+    }
+
+
+def execute(request, on_progress=None):
+    operation = request.get('operation', 'translate')
+    data_dir = Path(request.get('dataDir') or ROOT).resolve()
+    config_path = Path(request.get('configPath') or ROOT / 'config.json')
+
+    if operation == 'doctor':
+        return doctor(request, data_dir, config_path)
+    if operation == 'cacheList':
+        import cache_ops
+        return {'entries': cache_ops.cache_list(data_dir)}
+    if operation == 'cacheClear':
+        import cache_ops
+        with exclusive(data_dir):
+            return cache_ops.clear_cache(data_dir, str(request.get('identity') or ''))
+    if operation == 'inspect':
+        return inspect(request)
+    if operation == 'translate':
+        return translate(request, data_dir, config_path, on_progress)
+    raise ValueError('未知操作。')
 
 
 def main():
     request = json.load(sys.stdin)
-    output_stream = sys.stdout
+    output = sys.stdout
+
     def event(value):
-        output_stream.write(json.dumps(value, ensure_ascii=False)+'\n')
-        output_stream.flush()
+        output.write(json.dumps(value, ensure_ascii=False) + '\n')
+        output.flush()
+
     streaming = request.get('events') is True
     try:
         with contextlib.redirect_stdout(sys.stderr):
-            result = execute(request, (lambda value:event({'type':'progress', 'value':value})) if streaming else None)
-        event({'type':'result', 'value':result} if streaming else result)
+            result = execute(request, (lambda value: event({'type': 'progress', 'value': value})) if streaming else None)
+        event({'type': 'result', 'value': result} if streaming else result)
     except Exception as exc:
         message = str(exc)
         try:
-            key = load_config(request.get('configPath') or ROOT/'config.json').get('api_key')
+            key = load_config(request.get('configPath') or ROOT / 'config.json').get('api_key')
             if key:
                 message = message.replace(key, '[REDACTED]')
         except Exception:
             pass
-        event({'type':'error', 'error':message} if streaming else {'error':message})
+        event({'type': 'error', 'error': message} if streaming else {'error': message})
         sys.exit(1)
 
 

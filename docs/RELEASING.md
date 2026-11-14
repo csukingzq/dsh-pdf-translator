@@ -16,10 +16,10 @@ npm.cmd run check
 npm.cmd test
 .venv\Scripts\python.exe -m unittest discover -s work -p 'test_*.py'
 npm.cmd pack --pack-destination dist
-node scripts\verify-package.mjs dist\dsh-pdf-translator-0.2.5.tgz
+node scripts\verify-package.mjs dist\dsh-pdf-translator-1.0.0.tgz
 ```
 
-`verify-package` 必须通过；包内不能出现 `.venv`、`runtime`、`config.json`、缓存、输出、密钥或测试临时文件。
+`verify-package` 必须通过；包内不能出现 `.venv`、`runtime`、`config.json`、`work/runs.json`、缓存、输出、密钥或测试临时文件。
 
 ## 发版
 
@@ -76,7 +76,7 @@ npm publish --access public
 2. 启用并重启；
 3. 打开 PDF 翻译面板，确认出现「首次使用需要准备运行环境」，点「一键准备环境」，观察进度、取消与重试；
 4. 安装完成后在面板填写模型配置并保存（另测一次留空密钥保持不变）；
-5. 调用 `pdf_translator_doctor`，确认环境就绪且未暴露密钥；
-6. 用一页 PDF 做真实翻译（需用户同意，可能产生费用）；
-7. 检查输出目录：每次翻译的子文件夹中只有中文 PDF 和 LaTeX 源码 zip；解压 zip 后可独立编译。
-8. 已有环境的升级场景：面板不应再出现首次使用向导。
+5. 调用 `pdf_translator_doctor`，确认引擎就绪且未暴露密钥；
+6. 用 3–5 页 PDF 做真实翻译（需用户同意，可能产生费用）；
+7. 检查输出目录：每次翻译的子文件夹中只有 mono PDF、dual PDF 和 report.json；
+8. 已有环境的升级场景：面板不应再出现首次使用向导；如仍显示未就绪，删除 `runtime/pdf2zh.json` 后重新探测。

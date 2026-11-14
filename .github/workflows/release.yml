@@ -40,16 +40,15 @@ jobs:
       - name: Install Node dependencies
         run: npm ci
 
-      - name: Prepare PDF translator runtime
-        shell: powershell
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup.ps1 -DataDir "${{ github.workspace }}"
+      - name: Install Python test dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
 
       - name: Build and test
         run: |
           npm run build
           npm run check
           npm test
-          .venv\Scripts\python.exe -m unittest discover -s work -p "test_*.py"
+          python -m unittest discover -s work -p "test_*.py"
 
       - name: Pack release artifact
         shell: powershell

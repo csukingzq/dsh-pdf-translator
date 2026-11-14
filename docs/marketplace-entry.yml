@@ -3,5 +3,5 @@ name: csukingzq/dsh-pdf-translator
 category: docs
 tarball: https://github.com/csukingzq/dsh-pdf-translator/releases/latest/download/dsh-pdf-translator.tgz
 description:
-  en: 'Windows PDF translator for DeepSeek Harness: a vision model locates and translates text, tables, figures and formulas; output is a Chinese PDF and a LaTeX source zip. Requires a vision-capable OpenAI-compatible API.'
-  zh: 'DeepSeek Harness 的 Windows PDF 翻译插件：由视觉模型识别并翻译正文、表格、图表和公式，输出中文 PDF 与 LaTeX 源码压缩包。需要自备支持图片输入的 OpenAI 兼容 API。'
+  en: 'Layout-preserving PDF translator for DeepSeek Harness, powered by pdf2zh-next / BabelDOC. Outputs a translated PDF and a bilingual side-by-side PDF; requires an OpenAI-compatible text translation API.'
+  zh: 'DeepSeek Harness 的版式保留式 PDF 翻译插件，内核为 pdf2zh-next / BabelDOC：保留公式、图表与双栏排版原位替换，输出单语译文 PDF 与双语对照 PDF。需要自备 OpenAI 兼容的文本翻译 API。'

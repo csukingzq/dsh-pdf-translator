@@ -24,18 +24,19 @@ test('built panel: native selection, confirmation, validation, defaults, backgro
   dom.window.__ModuleLoader__={load:row=>{bundle=row.factory(require);}};
   vm.runInThisContext(await fs.readFile(new URL('../lib/client.js',import.meta.url),'utf8'));
   const store=bundle.createPanelState();store.set({sessionId:'s'});
-  const requests=[];let tasks=[],outputDir='D:\\默认输出',pick={cancelled:false,path:'D:\\资料\\论文.pdf'},pickError=false,aiReview=false,created=0;
+  const requests=[];let tasks=[],outputDir='D:\\默认输出',pick={cancelled:false,path:'D:\\资料\\论文.pdf'},pickError=false,created=0;
   const readySetup={ready:true,running:false,platform:'win32',platformOk:true,phase:'done',message:'',error:'',configError:'',elapsedSeconds:0,log:[],
-    missing:{python:false,runtime:false,config:false,model:false},config:{baseUrl:'https://api.example.com/v1',model:'vision',hasApiKey:true}};
+    missing:{python:false,engine:false,config:false,model:false},engine:{ready:true,version:'2.10.2',error:''},
+    config:{baseUrl:'https://api.example.com/v1',model:'text-model',hasApiKey:true}};
   const call=async r=>{
     requests.push(r);
-    if(r.action==='status')return {tasks,outputDir,aiReview,configured:true,setup:readySetup,busy:tasks.some(t=>['running','stopping'].includes(t.status))};
+    if(r.action==='status')return {tasks,outputDir,configured:true,setup:readySetup,busy:tasks.some(t=>['running','stopping'].includes(t.status))};
     if(r.action==='pick'){if(pickError)throw Error('系统窗口不可用');return pick;}
     if(r.action==='inspect')return {path:r.pdf,pages:8,bytes:1024};
-    if(r.action==='settings'){outputDir=r.outputDir??outputDir;aiReview=r.aiReview??aiReview;return {outputDir,aiReview,configured:true};}
-    if(r.action==='start'){tasks=[{id:'job',args:r.args,status:'running',progress:{phase:'recognizing',completed:2,total:6}}];return {jobId:'job'};}
-    if(r.action==='caches')return {entries:[{id:'0123456789abcdef',name:'论文.pdf',bytes:2048,busy:tasks.length>0}],cleaningDisabled:tasks.length>0};
-    if(r.action==='prepareClear')return {id:r.identity,name:'论文.pdf',bytes:2048,token:'confirmed',message:'原 PDF 和导出成果会保留。'};
+    if(r.action==='settings'){outputDir=r.outputDir??outputDir;return {outputDir,configured:true};}
+    if(r.action==='start'){tasks=[{id:'job',args:r.args,status:'running',progress:{phase:'translating',stage:'ILTranslator',percent:50,completed:2,total:6}}];return {jobId:'job'};}
+    if(r.action==='caches')return {entries:[{id:'engine',name:'翻译引擎共享缓存（BabelDOC）',bytes:2048,blocked:''}],cleaningDisabled:tasks.length>0};
+    if(r.action==='prepareClear')return {id:r.identity,name:'翻译引擎共享缓存（BabelDOC）',bytes:2048,token:'confirmed',message:'原 PDF 和导出成果会保留。'};
     if(r.action==='clear')return {cleared:true};
     throw Error('Unscripted action '+r.action);
   };
@@ -46,7 +47,7 @@ test('built panel: native selection, confirmation, validation, defaults, backgro
     click('PDF 翻译');await act(async()=>{});
     assert.equal(view.container.querySelector('.pdf-entry').hidden,true);
     assert.equal(view.container.querySelectorAll('.pdf-actions button').length,4);
-    assert.equal(view.getByRole('switch',{name:'AI 核验'}).checked,false);
+    assert.equal(view.queryByRole('switch'),null);
     await choose();assert.equal(view.getByLabelText('翻译页码').value,'全部');
     assert.equal(requests.some(r=>r.action==='start'),false);
     click('取消');assert.equal(view.queryByRole('dialog'),null);
@@ -65,23 +66,24 @@ test('built panel: native selection, confirmation, validation, defaults, backgro
     fireEvent.change(view.getByLabelText('翻译页码'),{target:{value:''}});
     assert.equal(view.getByRole('button',{name:'开始翻译'}).disabled,false);
     fireEvent.change(view.getByLabelText('翻译页码'),{target:{value:'1,3,5-8'}});
-    click('开始翻译');await waitFor(()=>view.getByText('2/6 页'));
-    assert.deepEqual(requests.find(r=>r.action==='start').args,{pdf:'D:\\资料\\论文.pdf',pages:'1,3,5,6,7,8',workers:4,imageQuality:'safe',thinking:'auto',outputDir:'D:\\中文 输出',aiReview:false});
+    click('开始翻译');await waitFor(()=>view.getByText(/2\/6 段/));
+    assert.ok(view.getByText(/50%/));
+    assert.deepEqual(requests.find(r=>r.action==='start').args,{pdf:'D:\\资料\\论文.pdf',pages:'1,3,5,6,7,8',workers:4,outputDir:'D:\\中文 输出'});
     click('收起');assert.equal(view.container.querySelector('.pdf-entry').hidden,false);
     assert.equal(requests.some(r=>r.action==='cancel'),false);
     click('PDF 翻译 ·');await act(async()=>{});
     const picks=requests.filter(r=>r.action==='pick').length;
     click('选择 PDF');await act(async()=>{});
     assert.equal(requests.filter(r=>r.action==='pick').length,picks);
-    click('清理缓存');await waitFor(()=>view.getByRole('button',{name:'清理该文档缓存'}));
-    assert.equal(view.getByRole('button',{name:'清理该文档缓存'}).disabled,true);
+    click('清理缓存');await waitFor(()=>view.getByRole('button',{name:'清理引擎缓存'}));
+    assert.equal(view.getByRole('button',{name:'清理引擎缓存'}).disabled,true);
     click('关闭窗口');
     tasks=[];click('收起');click('PDF 翻译 ·');await act(async()=>{});
-    click('清理缓存');await waitFor(()=>assert.equal(view.getByRole('button',{name:'清理该文档缓存'}).disabled,false));
-    click('清理该文档缓存');await waitFor(()=>view.getByRole('alertdialog'));
+    click('清理缓存');await waitFor(()=>assert.equal(view.getByRole('button',{name:'清理引擎缓存'}).disabled,false));
+    click('清理引擎缓存');await waitFor(()=>view.getByRole('alertdialog'));
     assert.equal(requests.some(r=>r.action==='clear'),false);
     click('取消');assert.equal(requests.some(r=>r.action==='clear'),false);
-    click('清理该文档缓存');await waitFor(()=>view.getByRole('alertdialog'));click('确认清理');
+    click('清理引擎缓存');await waitFor(()=>view.getByRole('alertdialog'));click('确认清理');
     await waitFor(()=>assert.equal(requests.filter(r=>r.action==='clear').length,1));
     assert.equal(requests.find(r=>r.action==='clear').token,'confirmed');
     await waitFor(()=>assert.equal(view.getByRole('button',{name:'关闭窗口'}).disabled,false));click('关闭窗口');
@@ -91,13 +93,9 @@ test('built panel: native selection, confirmation, validation, defaults, backgro
     pickError=false;await act(async()=>store.set({sessionId:null}));await choose();
     assert.equal(view.getByRole('button',{name:'开始翻译'}).disabled,false);click('取消');
     assert.equal(created,0);
-    fireEvent.click(view.getByRole('switch',{name:'AI 核验'}));await waitFor(()=>assert.equal(aiReview,true));
     await choose();const before=requests.filter(r=>r.action==='start').length;
     click('开始翻译');click('开始翻译');await waitFor(()=>assert.equal(requests.filter(r=>r.action==='start').length,before+1));
     assert.equal(created,1);assert.equal(requests.filter(r=>r.action==='start').at(-1).sessionId,'created');
-    assert.equal(tasks[0].args.aiReview,true);
-    await waitFor(()=>assert.equal(view.getByRole('switch',{name:'AI 核验'}).disabled,false));
-    fireEvent.click(view.getByRole('switch',{name:'AI 核验'}));await waitFor(()=>assert.equal(aiReview,false));
-    assert.equal(tasks[0].args.aiReview,true);
+    assert.equal(tasks[0].args.pages,'all');
   }finally{cleanup();dom.window.close();}
 });

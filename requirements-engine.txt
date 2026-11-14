@@ -1,0 +1,3 @@
+# Translation kernel: pdf2zh-next 2.x (BabelDOC) installed separately from the
+# bridge dependencies so a broken engine never blocks inspect/doctor.
+pdf2zh-next>=2.9,<3
