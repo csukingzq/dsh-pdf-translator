@@ -11,6 +11,13 @@ class ProgressTest(unittest.TestCase):
             'AutomaticTermExtractor': 'glossary',
             'ILTranslator': 'translating',
             'Typesetting': 'typesetting',
+            'Parse PDF and Create Intermediate Representation': 'analyzing',
+            'Parse Page Layout': 'analyzing',
+            'Automatic Term Extraction': 'glossary',
+            'Add Fonts': 'typesetting',
+            'Subset font': 'typesetting',
+            'Generate drawing instructions': 'typesetting',
+            'Save PDF': 'exporting',
         }
         for stage, phase in cases.items():
             self.assertEqual(progress.phase_for(stage), phase)
@@ -40,6 +47,17 @@ class ProgressTest(unittest.TestCase):
         self.assertGreaterEqual(event['percent'], 99)
         done = progress.completed({'phase': 'typesetting', 'percent': 90})
         self.assertEqual((done['phase'], done['percent']), ('completed', 100))
+
+    def test_mapped_event_is_idempotent(self):
+        raw = {'type': 'progress_update', 'stage': 'ILTranslator', 'stage_current': 3,
+               'stage_total': 10, 'overall_progress': 55.6}
+        first = progress.map_event(raw)
+        second = progress.map_event(first, first)
+        self.assertEqual(second['phase'], first['phase'])
+        self.assertEqual(second['percent'], first['percent'])
+        self.assertEqual(second['completed'], first['completed'])
+        self.assertEqual(second['total'], first['total'])
+        self.assertEqual(second['percent'], 56)
 
     def test_fallback_without_progress_values(self):
         event = progress.map_event({'type': 'progress_start', 'stage': 'LayoutParser'})

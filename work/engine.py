@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -52,6 +53,21 @@ def run(request, on_progress=None):
     result = None
     failure = ''
     failure_kind = ''
+    # The engine can spend a long time importing BabelDOC and downloading
+    # assets before the first stage event. Keep the panel ticking instead of
+    # showing a frozen "preparing" row.
+    heartbeat = threading.Event()
+    if on_progress:
+        on_progress(dict(state))
+
+    def beat():
+        while not heartbeat.wait(2.0):
+            if on_progress:
+                tick = dict(state)
+                tick['elapsedSeconds'] = round(time.monotonic() - started, 1)
+                on_progress(tick)
+
+    threading.Thread(target=beat, daemon=True).start()
     with tempfile.TemporaryFile(mode='w+', encoding='utf-8', errors='replace') as sink:
         try:
             process = subprocess.Popen(
@@ -80,6 +96,8 @@ def run(request, on_progress=None):
                 if not isinstance(event, dict):
                     continue
                 kind = event.get('type')
+                if kind in {'progress', 'result', 'error'}:
+                    heartbeat.set()
                 if kind == 'progress':
                     state = progress.map_event(event, state)
                     state['elapsedSeconds'] = round(time.monotonic() - started, 1)
@@ -91,6 +109,7 @@ def run(request, on_progress=None):
                     failure = str(event.get('message') or '')
                     failure_kind = str(event.get('kind') or '')
         finally:
+            heartbeat.set()
             try:
                 process.stdout.close()
             except OSError:

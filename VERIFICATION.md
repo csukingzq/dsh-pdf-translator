@@ -9,6 +9,7 @@
   - 页码范围解析与归一化、引擎配置映射与环境变量覆盖（含 workers/qps/lang 校验与密钥不经 argv）、BabelDOC 进度事件到面板阶段的映射（百分比不回退）、错误分类与 ANSI 清理、运行目录创建与产物收集、运行记录与缓存维护、桥接协议的 inspect/doctor/translate/cacheList/cacheClear、独立引擎进程的 JSON 协议（伪引擎事件、失败清理、引擎缺失提示）。
 - `npm pack` + `node scripts/verify-package.mjs`：包内必需文件齐全，未包含 `.venv`、`runtime`、`config.json`、`work/runs.json`、输出目录与临时文件。
 - 静态检查：`grep` 确认源码不再引用 `pandoc`、`tectonic`、`pdf_review`、`aiReview`、`renderOnly`、`imageQuality` 或旧内核模块；旧模块与旧测试已删除。
+- 本地假 OpenAI 接口驱动的端到端进度验证（真实 BabelDOC 0.7.1，不访问外网、不产生费用）：进度事件从 0% 递增到 11% → 18% → 24% → 30% → 53% → 71% → 89% → 99% → 100%，阶段在解析/术语/翻译/排版/导出之间推进，`completed/total` 随阶段更新，产物与 `report.json` 正常生成；修复了「事件被映射两次导致百分比恒为 0」的问题，并为引擎启动阶段增加心跳（面板显示已等待秒数）。
 - 使用本机已有的 pdf2zh-next 2.9.0 环境（`D:\zotero-pdf2zh\server\zotero-pdf2zh-next-venv`）验证真实引擎集成：
   - `engine_host.settings_from` 能构造并通过真实 `SettingsModel.validate_settings()`（语言、页码、去水印、并发、qps、OpenAI 兼容参数经引擎 `transform` 后仍保留模型/地址/密钥），重复校验幂等；
   - 通过 JS 桥接 → `cli.py` → `engine_host.py` → 真实引擎跑通一次失败链路：无效密钥访问端点在引擎初始化阶段返回 401，桥接输出分类后的中文提示并清理运行目录与输入副本，不写运行记录，`~/.cache/babeldoc` 不被改动；

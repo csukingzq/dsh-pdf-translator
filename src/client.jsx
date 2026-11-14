@@ -165,7 +165,8 @@ export function Panel({store,call,ensureSession}){
         {current&&<div className="pdf-task" aria-live="polite">
           <strong title={current.args.pdf}>{fileName(current.args.pdf)}</strong>
           <progress aria-label="翻译进度" max={100} value={percent}/>
-          <div className="pdf-row"><small>{current.status==='stopping'?'正在取消':phaseNames[progress?.phase]||'准备'}{progress?.stage?` · ${progress.stage}`:''}</small><small>{percent}%{progress?.total?` · ${progress.completed||0}/${progress.total} 段`:''}</small></div>
+          <div className="pdf-row"><small>{current.status==='stopping'?'正在取消':phaseNames[progress?.phase]||'准备'}{progress?.stage?` · ${progress.stage}`:''}</small><small>{percent}%{progress?.elapsedSeconds?` · 已等待 ${progress.elapsedSeconds} 秒`:''}{progress?.total?` · ${progress.completed||0}/${progress.total} 段`:''}</small></div>
+          {progress?.phase==='preparing'&&<small>首次运行会下载 BabelDOC 模型（约 300 MB），可能需要几分钟。</small>}
         </div>}
       </div>
     </section>

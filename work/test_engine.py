@@ -60,7 +60,8 @@ class EngineRunTest(unittest.TestCase):
         self.assertAlmostEqual(result['seconds'], 1.5)
         self.assertIn('stderr tail', result['tail'])
         phases = [event['phase'] for event in events]
-        self.assertEqual(phases[0], 'analyzing')
+        self.assertEqual(phases[0], 'preparing')
+        self.assertIn('analyzing', phases)
         self.assertIn('translating', phases)
         self.assertEqual(phases[-1], 'completed')
         self.assertEqual(events[-1]['percent'], 100)
