@@ -85,6 +85,7 @@ def _report(prepared, result, meta):
         'baseUrl': str(meta.get('base_url') or ''),
         'seconds': round(float(result.get('seconds') or 0), 2),
         'tokenUsage': result.get('token_usage') or {},
+        'diagnostics': meta.get('diagnostics') or {},
         'createdAt': time.strftime('%Y-%m-%dT%H:%M:%S%z'),
     }
     Path(report).write_text(json.dumps(payload, ensure_ascii=False, indent=2), 'utf-8')

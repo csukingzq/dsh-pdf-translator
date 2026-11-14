@@ -123,6 +123,7 @@ def translate(request, data_dir, config_path, on_progress):
     import engine
     import engine_config
     import index
+    import mathfonts
     import outputs
     import pages
     import pymupdf
@@ -130,11 +131,25 @@ def translate(request, data_dir, config_path, on_progress):
     source = Path(request['pdf']).expanduser().resolve()
     if not source.is_file() or source.suffix.lower() != '.pdf':
         raise ValueError('找不到指定的 PDF 文件。')
+    fonts = set()
+    sample_text = ''
     with pymupdf.open(source) as doc:
         if doc.needs_pass:
             raise ValueError('请先解密 PDF。')
         count = len(doc)
-    indices = pages.page_indices(request.get('pages') or 'all', count)
+        indices = pages.page_indices(request.get('pages') or 'all', count)
+        for page_index in range(count):
+            try:
+                for font in doc.get_page_fonts(page_index):
+                    if font and len(font) > 3:
+                        fonts.add(font[3])
+            except Exception:
+                continue
+        for page_index in indices[:20]:
+            try:
+                sample_text += doc[page_index].get_text('text')
+            except Exception:
+                continue
     if not indices:
         raise ValueError('PDF 没有可处理的页面。')
     selected = pages.normalize(request.get('pages') or 'all', count)
@@ -145,6 +160,18 @@ def translate(request, data_dir, config_path, on_progress):
     version = engine_version()
     if not version:
         raise ValueError('未安装 pdf2zh-next 翻译引擎，请打开 PDF 翻译面板点击“一键准备环境”。')
+
+    # MathType/Advance math fonts have broken ToUnicode maps. Protect them as
+    # formulas so their glyph runs never reach the model as corrupted prose.
+    pattern = None
+    try:
+        pattern = mathfonts.formula_font_pattern(fonts)
+        diagnostics = mathfonts.diagnostics(fonts, mathfonts.suspicious_chars(sample_text))
+    except Exception:
+        diagnostics = {'mathFonts': [], 'formulaProtected': False, 'suspiciousChars': 0}
+    configured_pattern = str(cfg.get('formular_font_pattern') or '').strip()
+    diagnostics['formulaProtected'] = bool(pattern or configured_pattern)
+    diagnostics['formulaFontPattern'] = bool(configured_pattern)
 
     output_dir = Path(request.get('outputDir') or (data_dir / 'outputs')).expanduser().resolve()
     cache_root = (data_dir / 'work').resolve()
@@ -162,6 +189,7 @@ def translate(request, data_dir, config_path, on_progress):
                 'engine_dir': str(prepared['engine_dir']),
                 'pages': selected,
                 'workers': request.get('workers'),
+                'formular_font_pattern': pattern,
             }, on_progress)
             collected = outputs.collect(prepared, result, {
                 'source': str(source),
@@ -169,6 +197,7 @@ def translate(request, data_dir, config_path, on_progress):
                 'selected_pages': len(indices),
                 'model': model['model'],
                 'base_url': model['base_url'],
+                'diagnostics': diagnostics,
             })
         except BaseException:
             # Do not leave a full PDF copy behind for a failed run.
@@ -196,6 +225,7 @@ def translate(request, data_dir, config_path, on_progress):
         'source': str(source),
         'output_dir': str(prepared['run_dir']),
         'seconds': result.get('seconds'),
+        'diagnostics': diagnostics,
     }
 
 

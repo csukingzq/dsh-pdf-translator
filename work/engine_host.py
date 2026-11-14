@@ -83,6 +83,8 @@ def settings_from(request):
             no_mono=False,
             watermark_output_mode='no_watermark',
             translate_table_text=False,
+            formular_font_pattern=host['formular_font_pattern'],
+            formular_char_pattern=host['formular_char_pattern'],
         ),
         translate_engine_settings=OpenAICompatibleSettings(
             openai_compatible_base_url=host['base_url'],

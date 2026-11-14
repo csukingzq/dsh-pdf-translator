@@ -23,6 +23,18 @@ class _Doc:
     def __len__(self):
         return 3
 
+    def get_page_fonts(self, index):
+        if index == 0:
+            return [(505, 'cff', 'Type1', 'DGKPDI+AdvMacMthSyN', 'T1_0', ''),
+                    (915, 'cff', 'Type1', 'DGKNNF+AdvOT863180fb', 'T1_1', 'WinAnsiEncoding')]
+        return []
+
+    def __getitem__(self, index):
+        return self
+
+    def get_text(self, kind):
+        return 'ﬃ ¼ ð text'
+
 
 def fake_pymupdf():
     module = types.ModuleType('pymupdf')
@@ -87,8 +99,10 @@ class BridgeTest(unittest.TestCase):
 
     def test_translate_collects_outputs(self):
         events = []
+        seen = {}
 
         def fake_run(request, on_progress=None):
+            seen.update(request)
             engine = Path(request['engine_dir'])
             engine.mkdir(parents=True, exist_ok=True)
             mono = engine / 'p.no_watermark.zh-CN.mono.pdf'
@@ -110,9 +124,49 @@ class BridgeTest(unittest.TestCase):
         self.assertTrue(Path(result['report']).is_file())
         self.assertEqual(result['pages'], 3)
         self.assertEqual(events[0]['phase'], 'translating')
+        diagnostics = result['diagnostics']
+        self.assertIn('AdvMacMthSyN', diagnostics['mathFonts'])
+        self.assertTrue(diagnostics['formulaProtected'])
+        self.assertEqual(diagnostics['suspiciousChars'], 9)
+        self.assertIn('AdvMacMthSyN', seen['formular_font_pattern'])
+        report = json.loads(Path(result['report']).read_text('utf-8'))
+        self.assertIn('AdvMacMthSyN', report['diagnostics']['mathFonts'])
         rows = json.loads((self.data / 'work' / 'runs.json').read_text('utf-8'))
         self.assertEqual(rows[0]['identity'], hashlib.sha256(self.source.read_bytes()).hexdigest()[:16])
         self.assertEqual(rows[0]['name'], 'paper.pdf')
+
+    def test_plain_documents_keep_engine_defaults(self):
+        class PlainDoc(_Doc):
+            def get_page_fonts(self, index):
+                return [(1, 'cff', 'Type1', 'DGKNNF+AdvOT863180fb', 'T1_0', '')]
+
+            def get_text(self, kind):
+                return 'plain english prose'
+
+        module = types.ModuleType('pymupdf')
+        module.__version__ = '1.26.0'
+        module.open = lambda _path: PlainDoc()
+        seen = {}
+
+        def fake_run(request, on_progress=None):
+            seen.update(request)
+            engine = Path(request['engine_dir'])
+            engine.mkdir(parents=True, exist_ok=True)
+            mono = engine / 'p.mono.pdf'
+            dual = engine / 'p.dual.pdf'
+            mono.write_bytes(b'mono')
+            dual.write_bytes(b'dual')
+            return {'mono': str(mono), 'dual': str(dual), 'seconds': 1.0, 'version': '2.10.2'}
+
+        with mock.patch.dict(sys.modules, {'pymupdf': module}), \
+                mock.patch.object(cli, 'engine_version', return_value='2.10.2'), \
+                mock.patch('engine.run', fake_run):
+            result = self.execute({'operation': 'translate', 'pdf': str(self.source),
+                                   'outputDir': str(self.root / 'plain')})
+        self.assertIsNone(seen['formular_font_pattern'])
+        self.assertFalse(result['diagnostics']['formulaProtected'])
+        self.assertEqual(result['diagnostics']['mathFonts'], [])
+        self.assertEqual(result['diagnostics']['suspiciousChars'], 0)
 
     def test_failed_translation_discards_run_folder(self):
         def boom(request, on_progress=None):

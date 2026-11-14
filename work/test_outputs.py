@@ -43,7 +43,8 @@ class OutputTest(unittest.TestCase):
             'mono': str(mono), 'dual': str(dual), 'seconds': 12.5, 'version': '2.10.2',
             'lang_in': 'en', 'lang_out': 'zh-CN', 'token_usage': {'total': 10},
         }, {'source': str(self.source), 'pages': 'all', 'selected_pages': 1,
-            'model': 'text-model', 'base_url': 'https://api.example.com/v1'})
+            'model': 'text-model', 'base_url': 'https://api.example.com/v1',
+            'diagnostics': {'mathFonts': ['AdvMacMthSyN'], 'formulaProtected': True, 'suspiciousChars': 0}})
         run = prepared['run_dir']
         self.assertTrue(Path(result['output']).is_file())
         self.assertTrue(Path(result['dual']).is_file())
@@ -55,6 +56,8 @@ class OutputTest(unittest.TestCase):
         self.assertEqual(report['engine'], 'pdf2zh-next')
         self.assertEqual(report['langOut'], 'zh-CN')
         self.assertEqual(report['model'], 'text-model')
+        self.assertEqual(report['diagnostics']['mathFonts'], ['AdvMacMthSyN'])
+        self.assertTrue(report['diagnostics']['formulaProtected'])
         self.assertGreater(result['bytes'], 0)
         self.assertEqual(Path(result['report']).parent, run)
 

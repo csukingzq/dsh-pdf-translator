@@ -17,6 +17,7 @@ const required = [
   'package/work/progress.py',
   'package/work/errors.py',
   'package/work/index.py',
+  'package/work/mathfonts.py',
   'package/work/cache_ops.py',
   'package/requirements.txt',
   'package/requirements-engine.txt',

@@ -102,6 +102,20 @@ class RequestTest(unittest.TestCase):
         request = engine_config.host_request(CONFIG, {}, PREPARED)
         self.assertNotIn('secret-key', ' '.join(str(value) for key, value in request.items() if key != 'api_key'))
 
+    def test_formula_patterns(self):
+        request = {'formular_font_pattern': r'(A|B)'}
+        host = engine_config.host_request(CONFIG, request, PREPARED)
+        self.assertEqual(host['formular_font_pattern'], '(A|B)')
+        self.assertIsNone(host['formular_char_pattern'])
+
+        override = {**CONFIG, 'formular_font_pattern': 'CUSTOM', 'formular_char_pattern': '[ﬃ]'}
+        host = engine_config.host_request(override, request, PREPARED)
+        self.assertEqual(host['formular_font_pattern'], 'CUSTOM')
+        self.assertEqual(host['formular_char_pattern'], '[ﬃ]')
+
+        host = engine_config.host_request(CONFIG, {'formular_font_pattern': ''}, PREPARED)
+        self.assertIsNone(host['formular_font_pattern'])
+
 
 if __name__ == '__main__':
     unittest.main()

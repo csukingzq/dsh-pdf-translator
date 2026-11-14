@@ -4,8 +4,8 @@
 
 ## 已执行的验证
 
-- `npm ci`、`npm run build`、`npm run check`、`npm test`：JavaScript 35 项全部通过。
-- `python -m unittest discover -s work -p "test_*.py"`：Python 64 项全部通过，只依赖标准库，不联网、无需引擎。
+- `npm ci`、`npm run build`、`npm run check`、`npm test`：JavaScript 37 项全部通过。
+- `python -m unittest discover -s work -p "test_*.py"`：Python 74 项全部通过，只依赖标准库，不联网、无需引擎。
   - 页码范围解析与归一化、引擎配置映射与环境变量覆盖（含 workers/qps/lang 校验与密钥不经 argv）、BabelDOC 进度事件到面板阶段的映射（百分比不回退）、错误分类与 ANSI 清理、运行目录创建与产物收集、运行记录与缓存维护、桥接协议的 inspect/doctor/translate/cacheList/cacheClear、独立引擎进程的 JSON 协议（伪引擎事件、失败清理、引擎缺失提示）。
 - `npm pack` + `node scripts/verify-package.mjs`：包内必需文件齐全，未包含 `.venv`、`runtime`、`config.json`、`work/runs.json`、输出目录与临时文件。
 - 静态检查：`grep` 确认源码不再引用 `pandoc`、`tectonic`、`pdf_review`、`aiReview`、`renderOnly`、`imageQuality` 或旧内核模块；旧模块与旧测试已删除。
@@ -19,11 +19,20 @@
   - 在 `%USERPROFILE%\.dsh\dsh-pdf-translator` 真实安装 `pdf2zh-next 2.10.2` + `babeldoc 0.7.1`，`pdf_translator_doctor` 报告 `engine.ready=true`、版本 2.10.2，就绪标记为无 BOM UTF-8；
   - 在新装的 2.10.2 上重复 `settings_from` + 双重 `validate_settings`，确认 OpenAI 兼容参数转换、页码、去水印、并发、qps 与密钥保留，`do_translate_async_stream` 可用。
 - 面板测试用 jsdom 覆盖：打开面板、选择 PDF、页码校验、开始翻译、进度百分比、输出目录、缓存确认（仅共享引擎缓存可清理）、手动路径回退、首次环境向导与模型配置保存。
+- MathType 行内公式乱码对照实验（原始 19 页 PDF、只翻第 18 页、离线 identity 翻译器，不产生 API 费用）：
+  - 源页字体：`AdvMacMthSyN`/`AdvMacMthIt`/`AdvP4C4E46`/`AdvEls-ent4`/`AdvPi1`，其中 4 个字体没有 ToUnicode 或映射错误；
+  - 默认设置下发给模型的文本含 **6 组 `ffi…` 串、542 个 `f`、12 个 `þ`、4 个 `ð`**，输出页仍有 3 组 `ffi` 串；
+  - 注入「BabelDOC 默认宽模式 + MathType/Advance 字体」的 `formular_font_pattern` 后，翻译输入中 **`ffi` 0 组、`þ/ð` 0 个**，输出页 `ffi` 0 组，原数学字体（`AdvMacMthSyN`、`AdvP4C4E46` 等）保留，公式视觉正常；
+  - 结论：乱码来自「MathType 字体文本层错位 → 被当正文送模型 → 译文保留 `ffi`」，公式字体保护可在不引入 MinerU、不改变版式与双语对照的前提下解决。
+- 真实翻译（由使用者在本机面板执行，配置 DeepSeek 文本模型）：两篇论文（15 页、19 页）成功产出 mono + dual + `report.json`；第 18 页乱码正是由此发现并用于上述实验。未做全文人工核验。
+- `tests/visual-panel.mjs`（Playwright + 本机 Chrome）已执行通过，并重新生成 `verification/panel-*.png` 截图。
 
 ## 未执行的验证（需真实环境）
 
-- 真实 PDF 翻译：需要安装 pdf2zh-next（约 1 GB）、首次下载 BabelDOC 模型并产生 API 费用，本次未执行。
-- `tests/visual-panel.mjs`（Playwright + 本机 Chrome）未执行；该脚本只做面板外观回归，不涉及翻译逻辑。
+- 第 18 页修复后的**真实模型单页验收**：修复代码已就绪，但仍需用使用者的 API key 对第 18 页做一次真实翻译（费用极小），确认中文正文与公式同时正常；本次签名验证只做到离线输入/输出文本与公式字体层面。
+- 19 页全文「修复后」的真实重跑与逐页人工核对未执行。
+- mineru-pdf-translate / MinerU 对比实验未端到端执行：本机存在 MinerU 模型文件（`C:\Users\23893\.mineru\models\...`）但未找到可调用的 `mineru` CLI/包，云端路线需要使用者提供 MinerU token；源码与文档分析显示其产物为重新排版 PDF（非原位、无双语），因此本轮未采用。
+- `tests/visual-panel.mjs` 依赖本机 Chrome，已在开发机执行；其他机器需自备浏览器。
 - 未在干净 Windows 机器上跑完整安装流程；`scripts/setup.ps1` 只做了静态检查与阶段标记约定核对。
 
 ## 真实翻译的手动验证步骤

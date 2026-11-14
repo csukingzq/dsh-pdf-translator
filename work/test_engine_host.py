@@ -63,6 +63,8 @@ async def do_translate_async_stream(settings, file):
         'pool': settings.translation.pool_max_workers,
         'qps': settings.translation.qps,
         'watermark': settings.pdf.watermark_output_mode,
+        'formular_font_pattern': settings.pdf.formular_font_pattern,
+        'formular_char_pattern': settings.pdf.formular_char_pattern,
         'model': settings.translate_engine_settings.openai_compatible_model,
         'base_url': settings.translate_engine_settings.openai_compatible_base_url,
         'api_key': settings.translate_engine_settings.openai_compatible_api_key,
@@ -132,6 +134,7 @@ class EngineHostTest(unittest.TestCase):
                 'engine_dir': str(run_dir / '_engine'),
                 'pages': '1-2',
                 'workers': 3,
+                'formular_font_pattern': '(A|B)',
             }
             result, events = run_host(request, fake, record)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -152,6 +155,8 @@ class EngineHostTest(unittest.TestCase):
             self.assertEqual(used['pool'], 3)
             self.assertEqual(used['qps'], 4)
             self.assertEqual(used['watermark'], 'no_watermark')
+            self.assertEqual(used['formular_font_pattern'], '(A|B)')
+            self.assertIsNone(used['formular_char_pattern'])
             self.assertEqual(used['model'], 'text-model')
             self.assertEqual(used['base_url'], 'https://api.example.com/v1')
             self.assertEqual(used['api_key'], 'sk-secret-value')

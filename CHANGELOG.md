@@ -20,6 +20,7 @@
 - 取消会结束引擎与其子进程；错误按鉴权/限流/超时/模型名/上下文/扫描件/缓存占用分类给出可操作提示。
 - 环境就绪改为 `runtime/pdf2zh.json` 标记 + 解释器探测，支持用 `DSH_PDF_PYTHON` 复用已有 pdf2zh-next 环境。
 - 修复面板进度：引擎事件曾被映射两次，导致百分比恒为 0、进度条不动；进度映射改为幂等，并在引擎启动/首次下载模型期间发送心跳与「已等待 N 秒」，面板同时提示首次运行会下载模型。
+- 修复 MathType 公式页面行内公式乱码：自动检测 `AdvMacMth*`/`AdvP4C4E*`/`AdvEls-*`/`AdvPi*` 等数学字体并注入 `formular_font_pattern`，这些字形不再进入模型（实测第 18 页翻译输入中的 `ffi` 串从 6 组降为 0，输出页同类串从 3 组降为 0，原数学字体保留）；结果写入 `report.json.diagnostics`，可用 `config.json` 覆盖或 `pages` 保护页兜底。
 - 修复 Windows PowerShell 5.1 环境准备失败：`setup.ps1` 改为纯 ASCII（5.1 会把无 BOM 的 UTF-8 脚本按 ANSI 读取而解析报错）；所有 Python 探测与 pip 调用改为捕获原生命令 stderr 的模式（5.1 在 `ErrorActionPreference=Stop` 下会把「引擎尚未安装」这类预期 stderr 当成终止错误）；就绪标记改为无 BOM UTF-8 写入，插件侧同时容忍 BOM；新增回归测试防止脚本再次引入非 ASCII 字符。
 - 测试：JavaScript 37 项、Python 65 项（纯标准库）覆盖页码范围、配置映射、进度映射（含幂等）、错误分类、产物收集、运行记录与缓存、桥接协议以及独立引擎进程的 JSON 协议（含伪引擎、真实引擎参数校验与本地假 OpenAI 接口的端到端进度验证）。
 

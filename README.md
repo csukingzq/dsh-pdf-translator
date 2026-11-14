@@ -120,6 +120,14 @@ setup.ps1 -DataDir "D:\dsh-pdf" -OfficialOnly -PipIndexUrls "https://pypi.tuna.t
 - 引擎翻译缓存由所有文档共享（默认位于 `%USERPROFILE%\.cache\babeldoc`）。面板「清理缓存」可整体清理该缓存；已导出的 PDF 不会被删除。
 - 翻译缓存命中不会再次调用模型；清理缓存后重新翻译会重新计费。
 
+### 数学公式字体（MathType）与行内公式乱码
+
+部分期刊 PDF 的公式用 MathType/Advance 的 Type1 字体排版，字体缺少正确的 `ToUnicode` 映射，文本层会变成 `¼`、`ð`、`r`、`ﬃ` 之类的错位字符。插件会自动检测 `AdvMacMth*`、`AdvP4C4E*`、`AdvEls-*`、`AdvPi*` 等字体，并把它们加入引擎的公式字体模式（`formular_font_pattern`），让这些字形保留原样、不再作为正文送给模型，从而避免译文里出现 `ffff`/`ffi` 乱码。
+
+- 检测与保护结果写入每次任务的 `report.json` 的 `diagnostics` 字段（`mathFonts`、`formulaProtected`）。
+- 自动检测不生效时，可以在 `config.json` 手动覆盖：`"formular_font_pattern": "(...)"`（会替换引擎默认模式，需自行包含默认项）；或加 `"formular_char_pattern": "..."` 按字符补充。
+- 如果某页仍无法正确翻译，可以用 `pages` 排除该页（例如 `1-17,19`），输出会保留该页原文。公式内容本身不做翻译或 LaTeX 重建。
+
 ## 数据、费用与限制
 
 用户数据默认位于 `%USERPROFILE%\.dsh\dsh-pdf-translator`，包括本地模型配置、运行环境、任务状态和运行记录。更新插件不会删除这些数据。可用 `DSH_PDF_DATA_DIR`、`DSH_PDF_CONFIG`、`DSH_PDF_PYTHON`、`DSH_PDF_RUNTIME_DIR` 覆盖对应路径。

@@ -127,6 +127,9 @@ def host_request(config, request, prepared):
         'pool_max_workers': workers(request),
         'qps': qps(config),
         'report_interval': 0.2,
+        # config.json wins over auto-detection; empty means "engine default".
+        'formular_font_pattern': _text(config.get('formular_font_pattern')) or _text(request.get('formular_font_pattern')) or None,
+        'formular_char_pattern': _text(config.get('formular_char_pattern')) or None,
         'base_url': model['base_url'],
         'model': model['model'],
         'api_key': model['api_key'],
