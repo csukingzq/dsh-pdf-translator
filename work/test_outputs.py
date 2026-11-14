@@ -58,6 +58,7 @@ class OutputTest(unittest.TestCase):
         self.assertEqual(report['model'], 'text-model')
         self.assertEqual(report['diagnostics']['mathFonts'], ['AdvMacMthSyN'])
         self.assertTrue(report['diagnostics']['formulaProtected'])
+        self.assertEqual(report['warnings'], [])
         self.assertGreater(result['bytes'], 0)
         self.assertEqual(Path(result['report']).parent, run)
 

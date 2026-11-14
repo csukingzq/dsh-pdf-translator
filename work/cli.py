@@ -172,6 +172,11 @@ def translate(request, data_dir, config_path, on_progress):
     configured_pattern = str(cfg.get('formular_font_pattern') or '').strip()
     diagnostics['formulaProtected'] = bool(pattern or configured_pattern)
     diagnostics['formulaFontPattern'] = bool(configured_pattern)
+    warnings = []
+    if diagnostics['mathFonts'] or diagnostics['suspiciousChars']:
+        warnings.append(
+            '检测到 MathType/数学字体：行内公式可能无法完整重排。'
+            '如需公式正确，请使用 MinerU 引擎模式，或用 pages 排除相关页保留原文。')
 
     output_dir = Path(request.get('outputDir') or (data_dir / 'outputs')).expanduser().resolve()
     cache_root = (data_dir / 'work').resolve()
@@ -198,6 +203,7 @@ def translate(request, data_dir, config_path, on_progress):
                 'model': model['model'],
                 'base_url': model['base_url'],
                 'diagnostics': diagnostics,
+                'warnings': warnings,
             })
         except BaseException:
             # Do not leave a full PDF copy behind for a failed run.
@@ -226,6 +232,7 @@ def translate(request, data_dir, config_path, on_progress):
         'output_dir': str(prepared['run_dir']),
         'seconds': result.get('seconds'),
         'diagnostics': diagnostics,
+        'warnings': warnings,
     }
 
 

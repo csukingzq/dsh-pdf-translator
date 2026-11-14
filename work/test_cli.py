@@ -129,8 +129,11 @@ class BridgeTest(unittest.TestCase):
         self.assertTrue(diagnostics['formulaProtected'])
         self.assertEqual(diagnostics['suspiciousChars'], 9)
         self.assertIn('AdvMacMthSyN', seen['formular_font_pattern'])
+        self.assertTrue(result['warnings'])
+        self.assertIn('MathType', result['warnings'][0])
         report = json.loads(Path(result['report']).read_text('utf-8'))
         self.assertIn('AdvMacMthSyN', report['diagnostics']['mathFonts'])
+        self.assertTrue(report['warnings'])
         rows = json.loads((self.data / 'work' / 'runs.json').read_text('utf-8'))
         self.assertEqual(rows[0]['identity'], hashlib.sha256(self.source.read_bytes()).hexdigest()[:16])
         self.assertEqual(rows[0]['name'], 'paper.pdf')
@@ -167,6 +170,7 @@ class BridgeTest(unittest.TestCase):
         self.assertFalse(result['diagnostics']['formulaProtected'])
         self.assertEqual(result['diagnostics']['mathFonts'], [])
         self.assertEqual(result['diagnostics']['suspiciousChars'], 0)
+        self.assertEqual(result['warnings'], [])
 
     def test_failed_translation_discards_run_folder(self):
         def boom(request, on_progress=None):
