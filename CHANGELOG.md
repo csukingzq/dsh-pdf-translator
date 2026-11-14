@@ -19,6 +19,7 @@
 - 输出目录每次任务新建子目录，内含 `<文件名>-mono.pdf`、`<文件名>-dual.pdf`、`report.json`；文件名截断以避免 Windows 路径超限。
 - 取消会结束引擎与其子进程；错误按鉴权/限流/超时/模型名/上下文/扫描件/缓存占用分类给出可操作提示。
 - 环境就绪改为 `runtime/pdf2zh.json` 标记 + 解释器探测，支持用 `DSH_PDF_PYTHON` 复用已有 pdf2zh-next 环境。
+- 修复 Windows PowerShell 5.1 环境准备失败：`setup.ps1` 改为纯 ASCII（5.1 会把无 BOM 的 UTF-8 脚本按 ANSI 读取而解析报错）；所有 Python 探测与 pip 调用改为捕获原生命令 stderr 的模式（5.1 在 `ErrorActionPreference=Stop` 下会把「引擎尚未安装」这类预期 stderr 当成终止错误）；就绪标记改为无 BOM UTF-8 写入，插件侧同时容忍 BOM；新增回归测试防止脚本再次引入非 ASCII 字符。
 - 测试：JavaScript 35 项、Python 64 项（纯标准库）覆盖页码范围、配置映射、进度映射、错误分类、产物收集、运行记录与缓存、桥接协议以及独立引擎进程的 JSON 协议（含伪引擎与真实引擎参数校验）。
 
 以下 0.x 记录对应旧内核（AI 视觉识别 + LaTeX 重排），仅作历史保留。

@@ -27,10 +27,31 @@ function Resolve-DataDir {
     return [IO.Path]::GetFullPath((Join-Path $homeDir 'dsh-pdf-translator'))
 }
 
+# Run a native command without letting stderr become a terminating error.
+# Windows PowerShell 5.1 turns native stderr into an ErrorRecord, and with
+# $ErrorActionPreference = 'Stop' any expected probe failure (for example
+# "pdf2zh-next is not installed") would otherwise abort the whole setup.
+function Invoke-NativeProbe {
+    param([string]$Exe, [string[]]$Arguments = @())
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = (& $Exe @Arguments 2>$null)
+        $exit = $LASTEXITCODE
+    } catch {
+        $output = $null
+        $exit = -1
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+    $text = if ($output -eq $null) { '' } else { ($output | Out-String).Trim() }
+    return @{ Output = $text; ExitCode = $exit }
+}
+
 function Test-PythonVersion {
     param([string]$Exe, [string[]]$Arguments = @())
-    & $Exe @Arguments -c "import sys; raise SystemExit(0 if (3,10) <= sys.version_info[:2] < (3,14) else 1)" 2>$null | Out-Null
-    return $LASTEXITCODE -eq 0
+    $probe = Invoke-NativeProbe -Exe $Exe -Arguments ($Arguments + @('-c', 'import sys; raise SystemExit(0 if (3,10) <= sys.version_info[:2] < (3,14) else 1)'))
+    return $probe.ExitCode -eq 0
 }
 
 function Find-BasePython {
@@ -50,7 +71,7 @@ function Find-BasePython {
     foreach ($candidate in $candidates) {
         if (Test-PythonVersion -Exe $candidate.Exe -Arguments $candidate.Args) { return $candidate }
     }
-    throw '需要 Python 3.10–3.13。请安装 Python，或使用 DSH 桌面版自带的 Python。'
+    throw 'Python 3.10-3.13 is required. Install Python or use the Python runtime bundled with DSH Desktop.'
 }
 
 $DataDir = Resolve-DataDir -Requested $DataDir
@@ -70,9 +91,16 @@ if (-not (Test-Path -LiteralPath $venvPython)) {
     $base = Find-BasePython
     $baseArgs = @($base.Args)
     Write-Host "Creating Python environment with $($base.Exe) ..."
-    & $base.Exe @baseArgs -m venv $venvDir
-    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $venvPython)) {
-        throw "无法创建 Python 环境。请确认 Python 3.10–3.13：$($base.Exe)"
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $base.Exe @baseArgs -m venv $venvDir
+        $venvExit = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+    if ($venvExit -ne 0 -or -not (Test-Path -LiteralPath $venvPython)) {
+        throw "Failed to create the Python environment. Verify Python 3.10-3.13: $($base.Exe)"
     }
 }
 
@@ -88,8 +116,16 @@ function Invoke-PipInstall {
     $pipArgs += @('-r', $Requirements)
     $source = if ($IndexUrl) { $IndexUrl } else { 'the default pip index' }
     Write-Host "$Label via $source ..."
-    & $venvPython @pipArgs | Out-Host
-    return $LASTEXITCODE
+    # pip warnings go to stderr; keep them from aborting the script under Stop.
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $venvPython @pipArgs | Out-Host
+        $exit = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+    return $exit
 }
 
 function Install-Requirements {
@@ -108,24 +144,31 @@ $engineRequirements = Join-Path $projectRoot 'requirements-engine.txt'
 $requiresEngine = Test-Path -LiteralPath $engineRequirements
 
 Install-Requirements -Label 'Installing Python dependencies' -Requirements (Join-Path $projectRoot 'requirements.txt')
-& $venvPython -c "import pymupdf, pypdf" 2>$null
-if ($LASTEXITCODE -ne 0) { throw 'Python dependencies are not importable after installation.' }
+$importProbe = Invoke-NativeProbe -Exe $venvPython -Arguments @('-c', 'import pymupdf, pypdf')
+if ($importProbe.ExitCode -ne 0) { throw 'Python dependencies are not importable after installation.' }
 
 if ($requiresEngine) {
-    $installedVersion = (& $venvPython -c "import importlib.metadata as m; print(m.version('pdf2zh-next'))" 2>$null)
-    if ($LASTEXITCODE -ne 0 -or -not $installedVersion) {
+    $versionProbe = Invoke-NativeProbe -Exe $venvPython -Arguments @('-c', "import importlib.metadata as m; print(m.version('pdf2zh-next'))")
+    $installedVersion = $versionProbe.Output
+    if ($versionProbe.ExitCode -ne 0 -or -not $installedVersion) {
         Install-Requirements -Label 'Installing the translation engine' -Requirements $engineRequirements
     } else {
         Write-Host "pdf2zh-next already installed: $installedVersion"
     }
-    & $venvPython -c "import pymupdf, pypdf, pdf2zh_next" 2>$null
-    if ($LASTEXITCODE -ne 0) { throw 'The translation engine is not importable after installation.' }
-    $installedVersion = (& $venvPython -c "import importlib.metadata as m; print(m.version('pdf2zh-next'))").Trim()
-    @{
+    $engineProbe = Invoke-NativeProbe -Exe $venvPython -Arguments @('-c', 'import pymupdf, pypdf, pdf2zh_next')
+    if ($engineProbe.ExitCode -ne 0) { throw 'The translation engine is not importable after installation.' }
+    $versionProbe = Invoke-NativeProbe -Exe $venvPython -Arguments @('-c', "import importlib.metadata as m; print(m.version('pdf2zh-next'))")
+    $installedVersion = $versionProbe.Output
+    if ($versionProbe.ExitCode -ne 0 -or -not $installedVersion) { throw 'The translation engine version cannot be read after installation.' }
+    $markerJson = @{
         version = $installedVersion
         python = $venvPython
         installedAt = (Get-Date).ToString('o')
-    } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $runtimeDir 'pdf2zh.json') -Encoding utf8
+    } | ConvertTo-Json
+    # Write UTF-8 without a BOM: Windows PowerShell's -Encoding utf8 adds one,
+    # and JSON.parse on the plugin side would then fail on the marker.
+    [IO.File]::WriteAllText((Join-Path $runtimeDir 'pdf2zh.json'), $markerJson,
+        (New-Object System.Text.UTF8Encoding($false)))
 }
 
 $createdConfig = $false

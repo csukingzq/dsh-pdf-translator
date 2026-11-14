@@ -13,6 +13,10 @@
   - `engine_host.settings_from` 能构造并通过真实 `SettingsModel.validate_settings()`（语言、页码、去水印、并发、qps、OpenAI 兼容参数经引擎 `transform` 后仍保留模型/地址/密钥），重复校验幂等；
   - 通过 JS 桥接 → `cli.py` → `engine_host.py` → 真实引擎跑通一次失败链路：无效密钥访问端点在引擎初始化阶段返回 401，桥接输出分类后的中文提示并清理运行目录与输入副本，不写运行记录，`~/.cache/babeldoc` 不被改动；
   - 这些探测未产生 API 费用，也未执行成功的真实翻译。
+- Windows PowerShell 5.1 安装链路验证：
+  - 用假 `pdf2zh-next` 包在临时目录完整跑通 `setup.ps1`（建 venv → 装桥接依赖 → 装引擎 → 导入校验 → 读版本 → 写无 BOM 就绪标记 → 复制 config.json）；
+  - 在 `%USERPROFILE%\.dsh\dsh-pdf-translator` 真实安装 `pdf2zh-next 2.10.2` + `babeldoc 0.7.1`，`pdf_translator_doctor` 报告 `engine.ready=true`、版本 2.10.2，就绪标记为无 BOM UTF-8；
+  - 在新装的 2.10.2 上重复 `settings_from` + 双重 `validate_settings`，确认 OpenAI 兼容参数转换、页码、去水印、并发、qps 与密钥保留，`do_translate_async_stream` 可用。
 - 面板测试用 jsdom 覆盖：打开面板、选择 PDF、页码校验、开始翻译、进度百分比、输出目录、缓存确认（仅共享引擎缓存可清理）、手动路径回退、首次环境向导与模型配置保存。
 
 ## 未执行的验证（需真实环境）

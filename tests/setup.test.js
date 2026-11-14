@@ -61,15 +61,38 @@ function make(t, overrides = {}) {
   return { dir, configPath, scriptPath, controller, child, spawnCalls };
 }
 
-function makeReady(dir) {
+function makeReady(dir, markerText) {
   fs.mkdirSync(path.join(dir, '.venv', 'Scripts'), { recursive: true });
   fs.writeFileSync(path.join(dir, '.venv', 'Scripts', 'python.exe'), '');
   fs.mkdirSync(path.join(dir, 'runtime'), { recursive: true });
-  fs.writeFileSync(path.join(dir, 'runtime', 'pdf2zh.json'), JSON.stringify({ version: '2.10.2', python: 'x' }));
+  fs.writeFileSync(path.join(dir, 'runtime', 'pdf2zh.json'), markerText ?? JSON.stringify({ version: '2.10.2', python: 'x' }));
   fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({
     base_url: 'https://api.example.com/v1', model: 'text-model', api_key: 'secret-key',
   }));
 }
+
+test('setup script stays ASCII-only so Windows PowerShell 5.1 can parse it', () => {
+  const bytes = fs.readFileSync(new URL('../scripts/setup.ps1', import.meta.url));
+  const nonAscii = [...bytes].findIndex((byte) => byte > 0x7f);
+  assert.equal(nonAscii, -1,
+    'setup.ps1 must be ASCII: powershell.exe 5.1 reads it as ANSI and chokes on UTF-8 Chinese');
+  const text = bytes.toString('ascii');
+  for (const marker of [
+    'Creating Python environment',
+    'Installing Python dependencies',
+    'Installing the translation engine',
+    'PDF translator environment is ready.',
+  ]) assert.ok(text.includes(marker), `setup.ps1 lost phase marker: ${marker}`);
+});
+
+test('setup readiness accepts a UTF-8 BOM marker written by Windows PowerShell', (t) => {
+  const { dir, controller } = make(t);
+  makeReady(dir, '\uFEFF' + JSON.stringify({ version: '2.10.2', python: 'x' }));
+  const snapshot = controller.snapshot();
+  assert.equal(snapshot.missing.engine, false);
+  assert.equal(snapshot.engine.version, '2.10.2');
+  assert.equal(snapshot.ready, true);
+});
 
 test('setup snapshot reports missing pieces and becomes ready', (t) => {
   const { dir, controller } = make(t);

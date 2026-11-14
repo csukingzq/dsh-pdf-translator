@@ -73,7 +73,9 @@ export class SetupController {
 
   marker() {
     try {
-      const value = JSON.parse(fs.readFileSync(this.markerPath(), 'utf8'));
+      // Windows PowerShell 5.1 writes -Encoding utf8 with a BOM.
+      const text = fs.readFileSync(this.markerPath(), 'utf8').replace(/^\uFEFF/, '');
+      const value = JSON.parse(text);
       return { version: typeof value.version === 'string' ? value.version : '' };
     } catch {
       return { version: '' };
