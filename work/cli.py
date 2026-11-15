@@ -124,6 +124,8 @@ def translate(request, data_dir, config_path, on_progress):
     import engine_config
     import index
     import mathfonts
+    import mathrepair
+    import mathrules
     import outputs
     import pages
     import pymupdf
@@ -138,6 +140,7 @@ def translate(request, data_dir, config_path, on_progress):
             raise ValueError('请先解密 PDF。')
         count = len(doc)
         indices = pages.page_indices(request.get('pages') or 'all', count)
+        tex_roman_fonts = mathfonts.tex_roman_math_fonts(doc, indices)
         for page_index in range(count):
             try:
                 for font in doc.get_page_fonts(page_index):
@@ -170,13 +173,17 @@ def translate(request, data_dir, config_path, on_progress):
     except Exception:
         diagnostics = {'mathFonts': [], 'formulaProtected': False, 'suspiciousChars': 0}
     configured_pattern = str(cfg.get('formular_font_pattern') or '').strip()
+    if tex_roman_fonts:
+        pattern = (pattern or mathfonts.DEFAULT_BROAD_PATTERN)[:-1] + '|' + '|'.join(
+            name + r'(?!\d)' for name in tex_roman_fonts) + ')'
+    diagnostics['texRomanMathFonts'] = tex_roman_fonts
     diagnostics['formulaProtected'] = bool(pattern or configured_pattern)
     diagnostics['formulaFontPattern'] = bool(configured_pattern)
     warnings = []
     if diagnostics['mathFonts'] or diagnostics['suspiciousChars']:
         warnings.append(
             '检测到 MathType/数学字体：行内公式可能无法完整重排。'
-            '如需保留原文，可用 pages 参数排除相关页。')
+            '可用 pages 参数排除相关页；输出只包含所选页面。')
 
     output_dir = Path(request.get('outputDir') or (data_dir / 'outputs')).expanduser().resolve()
     cache_root = (data_dir / 'work').resolve()
@@ -187,6 +194,13 @@ def translate(request, data_dir, config_path, on_progress):
     with exclusive(data_dir):
         prepared = outputs.prepare(output_dir, source)
         try:
+            math_compatibility = bool(diagnostics['mathFonts'])
+            diagnostics['protectedVariableRuns'] = (
+                mathrepair.protect_variables(prepared['input'], indices)
+                if math_compatibility else 0)
+            diagnostics['normalizedRuleLines'] = (
+                mathrules.normalize_rules(prepared['input'], indices)
+                if mathrules.has_tex_math(fonts) else 0)
             result = engine.run({
                 'configPath': str(config_path),
                 'input': str(prepared['input']),
@@ -195,7 +209,10 @@ def translate(request, data_dir, config_path, on_progress):
                 'pages': selected,
                 'workers': request.get('workers'),
                 'formular_font_pattern': pattern,
+                'math_compatibility': math_compatibility,
+                'structured_layout': True,
             }, on_progress)
+            diagnostics.update(result.get('diagnostics') or {})
             collected = outputs.collect(prepared, result, {
                 'source': str(source),
                 'pages': selected,

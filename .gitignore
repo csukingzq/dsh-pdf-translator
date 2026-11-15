@@ -3,6 +3,8 @@ node_modules/
 runtime/
 config.json
 outputs/
+output/
+tmp/
 work/runs.json
 work/plugin-state.json
 work/__pycache__/

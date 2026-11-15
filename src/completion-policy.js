@@ -1,4 +1,6 @@
-export function completionPolicy(){
+import {completionPolicy as ocrPolicy} from './review.js';
+export function completionPolicy(enabled=false,engine='pdf2zh'){
+  if(engine==='ocr')return ocrPolicy(enabled);
   return '成功后只读取一次 job_output，直接简短回复“翻译完成”，并附结果中的 output（mono 单语 PDF）与 dual（双语对照 PDF）两个链接；有警告仅简短提示。不要列目录、读取译文、渲染预览或重新翻译；不可声称内容核验通过。失败或取消时如实报告。用户后续明确要求或本轮另有工作时可正常执行其他任务。';
 }
 
@@ -28,13 +30,14 @@ export class CompletionGate {
     if(exec.name==='job_output'&&state.tasks.has(a.job_id)&&!state.read.has(a.job_id)){
       state.read.add(a.job_id);return;
     }
-    // Markdown PDF links require no presentation/file tool.
-    return '本轮仅由 PDF 完成通知触发。每个任务只读取一次 job_output，然后简短回复并附结果中的 mono（output）与 dual PDF 链接。用户新要求和包含其他工作的轮次不受此限制。';
+    if(exec.name==='pdf_review'&&state.tasks.get(a.jobId)?.args?.engine==='ocr'&&state.tasks.get(a.jobId)?.aiReview)return;
+    // Markdown PDF/zip links require no presentation/file tool.
+    return '本轮仅由 PDF 完成通知触发。每个任务只读取一次 job_output；核验开启时用 pdf_review，否则直接简短回复并附结果中的 PDF 与 LaTeX 压缩包链接。用户新要求和包含其他工作的轮次不受此限制。';
   }
   prompt(owner){
     const state=this.turns.get(owner);
     if(!state?.tasks.size)return '';
-    return [...state.tasks.values()].map(t=>`PDF 任务 ${t.id}：${completionPolicy()}${t.status==='failed'||t.status==='killed'?' 此任务未成功，不得报告翻译完成。':''}`).join('\n');
+    return [...state.tasks.values()].map(t=>`PDF 任务 ${t.id} 的核验设置：${completionPolicy(t.aiReview,t.args?.engine||'pdf2zh')}${t.status==='failed'||t.status==='killed'?' 此任务未成功，不得报告翻译完成。':''}`).join('\n');
   }
 }
 
@@ -55,6 +58,14 @@ export function installCompletionPolicy(ctx,manager){
     return decision;
   });
   ctx.on('agent/inbox/inserted',({agent,message})=>gate.inserted(agent,message));
-  ctx.on('agent/turn-stopping',async({agent})=>{gate.turns.delete(agent.id);});
+  ctx.on('agent/turn-stopping',async({agent})=>{
+    const state=gate.turns.get(agent.id);
+    for(const task of state?.tasks.values()||[]){
+      if(task.aiReview&&['reviewing','repairing'].includes(task.status)&&!manager.review.locks.has(task.id)){
+        task.review.status='interrupted';task.review.summary='对话已结束但未完成核验，保留最近可用 PDF。';task.status='completed';await manager.persist();
+      }
+    }
+    gate.turns.delete(agent.id);
+  });
   return gate;
 }

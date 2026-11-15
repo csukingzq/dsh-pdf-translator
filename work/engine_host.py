@@ -79,6 +79,7 @@ def settings_from(request):
         ),
         pdf=PDFSettings(
             pages=None if host['pages'] == 'all' else host['pages'],
+            only_include_translated_page=host['pages'] != 'all',
             no_dual=False,
             no_mono=False,
             watermark_output_mode='no_watermark',
@@ -101,7 +102,10 @@ async def translate(request):
     from pdf2zh_next.high_level import do_translate_async_stream
 
     settings, host = settings_from(request)
-    async for event in do_translate_async_stream(settings, host['input']):
+    stream = (translate_math(settings, host, request.get('math_compatibility', False))
+              if request.get('math_compatibility') or request.get('structured_layout')
+              else do_translate_async_stream(settings, host['input']))
+    async for event in stream:
         kind = event.get('type')
         if kind == 'finish':
             return finish(event, host)
@@ -110,6 +114,57 @@ async def translate(request):
         if kind in progress.PROGRESS_TYPES:
             emit({'type': 'progress', **progress.map_event(event)})
     raise RuntimeError('翻译引擎没有返回结果。')
+
+
+async def translate_math(settings, host, math_compatibility=True):
+    """Use the engine's config adapter with a guarded layout model.
+
+    Already isolated by engine.py, so this path does not need pdf2zh-next's
+    additional multiprocessing wrapper (which cannot carry a custom model).
+    """
+    from pdf2zh_next.high_level import create_babeldoc_config
+    from babeldoc.format.pdf.high_level import async_translate
+    from mathlayout import MathLayoutModel
+    from structured_layout import StructuredLayoutModel
+    from translation_guard import TranslationGuard
+
+    config = create_babeldoc_config(settings, Path(host['input']))
+    same_translator = config.term_extraction_translator is config.translator
+    config.translator = TranslationGuard(config.translator)
+    config.term_extraction_translator = (config.translator if same_translator else
+                                        TranslationGuard(config.term_extraction_translator))
+    math_model = MathLayoutModel(config.doc_layout_model) if math_compatibility else None
+    model = StructuredLayoutModel(math_model or config.doc_layout_model)
+    config.doc_layout_model = model
+    async for event in async_translate(config):
+        if event.get('type') == 'finish':
+            event['diagnostics'] = model.diagnostics()
+            event['diagnostics']['invalidTextRetries'] = config.translator.retries + (
+                0 if same_translator else config.term_extraction_translator.retries)
+            event['token_usage'] = {
+                'main': token_usage(config.translator),
+                'term': token_usage(config.term_extraction_translator)
+                if config.term_extraction_translator is not config.translator else {},
+            }
+            if config.term_extraction_translator is config.translator:
+                usage = getattr(config, 'term_extraction_token_usage', None) or {}
+                if usage:
+                    event['token_usage']['term'] = {
+                        'total': int(usage.get('total_tokens', 0)),
+                        'prompt': int(usage.get('prompt_tokens', 0)),
+                        'completion': int(usage.get('completion_tokens', 0)),
+                        'cache_hit_prompt': int(usage.get('cache_hit_prompt_tokens', 0)),
+                    }
+        yield event
+        if event.get('type') in ('finish', 'error'):
+            return
+
+
+def token_usage(translator):
+    fields = {'total': 'token_count', 'prompt': 'prompt_token_count',
+              'completion': 'completion_token_count', 'cache_hit_prompt': 'cache_hit_prompt_token_count'}
+    values = {key: getattr(translator, field, 0) for key, field in fields.items()}
+    return {key: int(getattr(value, 'value', value) or 0) for key, value in values.items()}
 
 
 def finish(event, host):
@@ -125,6 +180,7 @@ def finish(event, host):
         'version': version(),
         'lang_in': host['lang_in'],
         'lang_out': host['lang_out'],
+        'diagnostics': event.get('diagnostics') or {},
     }
     emit(payload)
     return payload

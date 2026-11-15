@@ -25,3 +25,5 @@
 .pdf-primary{background:#346fe5!important;color:#fff!important;border-color:#346fe5!important}
 .pdf-cache{display:flex;flex-direction:column;gap:4px;padding:9px 0;border-bottom:1px solid var(--pdf-border)}.pdf-cache strong{overflow-wrap:anywhere}.pdf-cache button{align-self:flex-start}.pdf-cache-list{max-height:36vh;overflow:auto}
 .pdf-confirm{border:1px solid #bd8a37;background:var(--pdf-fill);padding:10px;border-radius:7px}.pdf-confirm p{font-size:12px}
+
+.pdf-translator-ui select{font:inherit;color:inherit;background:var(--pdf-bg);border:1px solid var(--pdf-border);border-radius:6px;padding:5px;max-width:100%;width:100%}

@@ -17,7 +17,7 @@ test('Cordis registers native tools, validates inputs and disposes registrations
   await new Promise(resolve => setTimeout(resolve, 30));
   const registry = ctx.get('tools');
   assert.ok(registry.get('pdf_translate'));
-  assert.equal(registry.get('pdf_review'), undefined);
+  assert.ok(registry.get('pdf_review'));
   assert.ok(ctx.get('pdfTranslator'));
   assert.ok(ctx.typert.local.get('pdfTranslator/call'));
   const signal = new AbortController().signal;

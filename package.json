@@ -1,11 +1,11 @@
 {
   "name": "dsh-pdf-translator",
-  "version": "1.0.0",
-  "description": "Layout-preserving PDF translation for DeepSeek Harness, powered by pdf2zh-next / BabelDOC",
+  "version": "1.1.0",
+  "description": "Dual-engine PDF translation for DeepSeek Harness: pdf2zh-next / BabelDOC and vision OCR with LaTeX",
   "type": "module",
   "main": "src/index.js",
   "author": "csukingzq",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/csukingzq/dsh-pdf-translator.git"
@@ -27,7 +27,12 @@
     "VERIFICATION.md",
     "CHANGELOG.md",
     "LICENSE",
-    "lib/client.js"
+    "lib/client.js",
+    "work/ocr/*.py",
+    "!work/ocr/test_*.py",
+    "requirements-structure.txt",
+    "LICENSE-MIT",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "dsh": {
     "bundle": {
@@ -45,7 +50,7 @@
   },
   "scripts": {
     "test": "node --test tests/*.test.js",
-    "check": "node --check src/index.js && node --check src/manager.js && node --check src/service.js && node --check src/setup.js && node --check src/contract.js && node --check src/runner.js && node --check src/completion-policy.js && node --check src/native-picker.js && node --check src/page-selection.js && node --check src/paths.js",
+    "check": "node --check src/index.js && node --check src/manager.js && node --check src/service.js && node --check src/setup.js && node --check src/contract.js && node --check src/runner.js && node --check src/completion-policy.js && node --check src/native-picker.js && node --check src/page-selection.js && node --check src/paths.js && node --check src/dual-setup.js && node --check src/review.js",
     "build": "node scripts/build-client.mjs",
     "test:visual": "node tests/visual-panel.mjs",
     "verify:package": "node scripts/verify-package.mjs",

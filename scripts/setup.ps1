@@ -84,6 +84,7 @@ New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
 
 if ($Force -and (Test-Path -LiteralPath $venvDir)) {
     Write-Host "Recreating Python environment: $venvDir"
+    if ([IO.Path]::GetFullPath($venvDir) -ne [IO.Path]::Combine([IO.Path]::GetFullPath($DataDir), '.venv')) { throw 'Unsafe venv path.' }
     Remove-Item -LiteralPath $venvDir -Recurse -Force
 }
 
@@ -150,7 +151,7 @@ if ($importProbe.ExitCode -ne 0) { throw 'Python dependencies are not importable
 if ($requiresEngine) {
     $versionProbe = Invoke-NativeProbe -Exe $venvPython -Arguments @('-c', "import importlib.metadata as m; print(m.version('pdf2zh-next'))")
     $installedVersion = $versionProbe.Output
-    if ($versionProbe.ExitCode -ne 0 -or -not $installedVersion) {
+    if ($versionProbe.ExitCode -ne 0 -or $installedVersion -ne '2.10.2') {
         Install-Requirements -Label 'Installing the translation engine' -Requirements $engineRequirements
     } else {
         Write-Host "pdf2zh-next already installed: $installedVersion"

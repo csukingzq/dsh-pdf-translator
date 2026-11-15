@@ -1,6 +1,7 @@
 import base64
 import re
 import unittest
+from types import SimpleNamespace
 
 import mathfonts
 
@@ -21,6 +22,18 @@ PAGE_FONTS = [
 
 
 class MathFontsTest(unittest.TestCase):
+    def test_tex_roman_operators_do_not_protect_a_prose_font(self):
+        def page(spans):
+            return SimpleNamespace(get_text=lambda _: {'blocks': [{'lines': [{'spans': [
+                {'font': font, 'text': text} for font, text in spans]}]}]})
+        doc = [page([('CMR7', '1+exp('), ('CMR7', 'BN'), ('CMR7', 'tr'),
+                     ('CMR10', 'xx'), ('Times', 'ordinary prose')]),
+               page([('CMR10', 'This is ordinary prose'), ('CMR7', 'inf')])]
+        self.assertEqual(mathfonts.tex_roman_math_fonts(doc, [0]), ['CMR10', 'CMR7'])
+        self.assertEqual(mathfonts.tex_roman_math_fonts(doc, [0, 1]), ['CMR7'])
+        self.assertEqual(mathfonts.tex_roman_math_fonts([page([('CMR7', 'if')])], [0]), [])
+        self.assertEqual(mathfonts.tex_roman_math_fonts(doc, [0, 20]), [])
+
     def test_base_name(self):
         self.assertEqual(mathfonts.base_name('DGKPDI+AdvMacMthSyN'), 'AdvMacMthSyN')
         self.assertEqual(mathfonts.base_name('DGKPBI+AdvOTb92eb7df.I+20'), '20')

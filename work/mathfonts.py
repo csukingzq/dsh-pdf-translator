@@ -80,6 +80,8 @@ def formula_font_pattern(font_names):
     if not families:
         return None
     additions = '|'.join(re.escape(name) for name in families)
+    # Isolated italic variables receive a separate resource in mathrepair.
+    additions += '|DSHMathItalic'
     return DEFAULT_BROAD_PATTERN[:-1] + '|' + additions + ')'
 
 
@@ -87,6 +89,40 @@ def suspicious_chars(text):
     """Count chars that usually mean a math font has no usable ToUnicode."""
     value = str(text or '')
     return sum(value.count(char) for char in SUSPICIOUS_CHARS)
+
+
+def tex_roman_math_fonts(doc, indices):
+    """Protect CMR operators only when that family is not also used for prose.
+
+    CMR is normally excluded by BabelDOC because LaTeX documents may use it for
+    their entire body. In Times-body papers it often contains only formula
+    digits, parentheses, and roman operators such as exp. Leaving exp as prose
+    splits fractions and prevents their rules from attaching to the formula.
+    Inspect every selected page before deciding at document scope.
+    """
+    operators = {'exp', 'log', 'ln', 'sin', 'cos', 'tan', 'cot', 'sec', 'csc',
+                 'sinh', 'cosh', 'tanh', 'min', 'max', 'lim', 'sup', 'inf',
+                 'arg', 'det', 'dim', 'ker', 'Pr', 'Var', 'Cov', 'Norm',
+                 'diag', 'rank', 'softmax', 'sigmoid', 'ReLU'}
+    prose_short = {'a', 'an', 'as', 'at', 'be', 'by', 'do', 'he', 'if',
+                   'in', 'is', 'it', 'of', 'on', 'or', 'so', 'to', 'up', 'we'}
+    seen, prose = set(), set()
+    try:
+        for index in indices:
+            for block in doc[index].get_text('dict')['blocks']:
+                for line in block.get('lines', []):
+                    for span in line['spans']:
+                        name = base_name(span['font'])
+                        if not re.fullmatch(r'CMR\d+', name) or not span['text'].strip():
+                            continue
+                        seen.add(name)
+                        words = re.findall(r'[A-Za-z]+', span['text'])
+                        if any((len(word) > 2 or (len(word) == 2 and word in prose_short))
+                               and word not in operators for word in words):
+                            prose.add(name)
+    except Exception:
+        return []  # An incomplete scan cannot establish that a font is math-only.
+    return sorted(seen - prose)
 
 
 def diagnostics(font_names, char_hits=0):

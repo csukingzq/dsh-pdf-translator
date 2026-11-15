@@ -60,6 +60,7 @@ async def do_translate_async_stream(settings, file):
         'lang_in': settings.translation.lang_in,
         'lang_out': settings.translation.lang_out,
         'pages': settings.pdf.pages,
+        'selected_only': settings.pdf.only_include_translated_page,
         'pool': settings.translation.pool_max_workers,
         'qps': settings.translation.qps,
         'watermark': settings.pdf.watermark_output_mode,
@@ -152,6 +153,7 @@ class EngineHostTest(unittest.TestCase):
             self.assertEqual(used['lang_in'], 'en')
             self.assertEqual(used['lang_out'], 'zh-CN')
             self.assertEqual(used['pages'], '1-2')
+            self.assertTrue(used['selected_only'])
             self.assertEqual(used['pool'], 3)
             self.assertEqual(used['qps'], 4)
             self.assertEqual(used['watermark'], 'no_watermark')
@@ -161,6 +163,13 @@ class EngineHostTest(unittest.TestCase):
             self.assertEqual(used['base_url'], 'https://api.example.com/v1')
             self.assertEqual(used['api_key'], 'sk-secret-value')
             self.assertEqual(used['input_files'], [str(source)])
+
+            request['pages'] = 'all'
+            result, _ = run_host(request, fake, record)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            used = json.loads(record.read_text('utf-8'))
+            self.assertIsNone(used['pages'])
+            self.assertFalse(used['selected_only'])
 
     def test_host_reads_environment_config(self):
         with tempfile.TemporaryDirectory() as tmp:

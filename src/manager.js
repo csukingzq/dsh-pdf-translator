@@ -6,27 +6,27 @@ import { runPython } from './runner.js';
 import { resolveDataDir } from './paths.js';
 import { translateSchema } from './contract.js';
 import {pickNative} from './native-picker.js';
+import {ReviewController} from './review.js';
 import {completionPolicy} from './completion-policy.js';
-import {SetupController} from './setup.js';
+import {DualSetupController} from './dual-setup.js';
 
 const activeStates = new Set(['preparing', 'running', 'stopping']);
-const phases = {preparing:'准备', analyzing:'解析版式', glossary:'提取术语', translating:'翻译段落', typesetting:'排版生成 PDF', exporting:'导出成果', completed:'完成'};
+const phases = {analyzing:'解析版式',glossary:'提取术语',translating:'翻译段落',typesetting:'排版生成 PDF',preparing:'准备', analyzing_structure:'分析全文结构', recognizing:'逐页识别', translating_paragraphs:'翻译正文段落', validating:'校验译文', assembling:'组装译文', compiling:'编译 PDF', exporting:'导出成果', completed:'完成'};
 export function progressText(p) {
-  const parts = [phases[p.phase] || p.phase];
-  parts.push(`${p.percent || 0}%`);
-  if (p.total) parts.push(`${p.completed || 0}/${p.total} 段`);
-  return parts.join(' · ');
+  if(p.percent!==undefined)return `${phases[p.phase]||p.phase} · ${p.percent}%${p.total?` · ${p.completed||0}/${p.total} 段`:''}`;
+  return `${phases[p.phase] || p.phase} · ${p.completed || 0}/${p.total || 0} 页 · 缓存 ${p.cached || 0} 页`;
 }
 export class TranslatorManager {
   constructor(ctx, config = {}, runner = runPython, picker = pickNative, setup = null) {
     this.ctx=ctx; this.config=config; this.runner=runner;
     this.dataDir=path.resolve(resolveDataDir(config));
     this.stateFile=path.join(this.dataDir,'work','plugin-state.json');
-    this.state={outputDir:path.resolve(config.outputDir || path.join(this.dataDir,'outputs')), configured:false, tasks:[]};
+    this.state={outputDir:path.resolve(config.outputDir || path.join(this.dataDir,'outputs')), configured:false, engine:'pdf2zh', aiReview:false, tasks:[]};
     this.active=null; this.busy=false; this.closed=false; this.tokens=new Map(); this.controllers=new Set();
     this.panelRequests=new Map();
     this.picker=picker; this.pickerController=null;
-    this.setup=setup || new SetupController(config,{dataDir:this.dataDir});
+    this.review=new ReviewController(this);
+    this.setup=setup || new DualSetupController(config,{dataDir:this.dataDir});
     this.writeChain=Promise.resolve(); this.ready=this.load();
     // Keep errors available to panel operations without an unhandled Host rejection.
     this.ready.catch(()=>{});
@@ -34,8 +34,14 @@ export class TranslatorManager {
   async load() {
     try { this.state=JSON.parse(await fs.readFile(this.stateFile,'utf8')); }
     catch(e){ if(e.code!=='ENOENT') throw new Error('插件状态文件无法读取，请保留文件并检查：'+this.stateFile); }
-    delete this.state.aiReview;
-    for(const task of this.state.tasks) if(activeStates.has(task.status)) {
+    this.state.engine=this.state.engine==='ocr'?'ocr':'pdf2zh';
+    for(const task of this.state.tasks){task.args.engine ??= task.result?.dual?'pdf2zh':'ocr';}
+    this.state.aiReview=this.state.aiReview===true;
+    const journals=path.join(this.dataDir,'work','review-transactions');
+    try{if((await fs.readdir(journals)).length)await this.runner({operation:'reviewRecover',engine:'ocr'},this.config);}catch(e){if(e.code!=='ENOENT')throw e;}
+    for(const task of this.state.tasks) if(['reviewing','repairing'].includes(task.status)) {
+      task.status='completed';task.review ??= {};task.review.status='interrupted';task.review.summary='核验因重启中断，保留最近可用 PDF。';
+    } else if(activeStates.has(task.status)) {
       task.status='interrupted'; task.error='应用退出或插件重载导致中断，可手动继续。'; task.finishedAt=Date.now();
     }
   }
@@ -61,14 +67,16 @@ export class TranslatorManager {
   }
   async settings(input){await this.ready; const value=typeof input==='string'?{outputDir:input}:input;
     if(value.outputDir!==undefined){this.state.outputDir=await this.outputDirectory(value.outputDir);this.state.configured=true;}
-    await this.persist();return {outputDir:this.state.outputDir,configured:this.state.configured};}
+    if(value.engine!==undefined)this.state.engine=value.engine;
+    if(value.aiReview!==undefined)this.state.aiReview=value.aiReview===true;
+    await this.persist();return {outputDir:this.state.outputDir,configured:this.state.configured,engine:this.state.engine,aiReview:this.state.aiReview};}
   async status(owner){await this.ready;if(this.setup.prime)await this.setup.prime();return {outputDir:this.state.outputDir,configured:this.state.configured,
-    setup:this.setup.snapshot(),
-    busy:Boolean(this.busy||this.active||this.setup.running),panelRequest:this.panelRequests.get(owner)||null,
+    aiReview:this.state.aiReview,engine:this.state.engine,setup:this.setup.snapshot(this.state.engine),setups:this.setup.snapshots?.(),
+    busy:Boolean(this.busy||this.active||this.review.active()||this.setup.running),panelRequest:this.panelRequests.get(owner)||null,
     tasks:this.state.tasks.filter(t=>t.owner===owner).slice(-20).reverse()};}
-  async setupStart(){await this.ready;if(this.closed)throw new Error('插件正在关闭。');
-    if(this.active||this.busy)throw new Error('翻译任务运行中，暂不能准备环境。');
-    return this.setup.start();}
+  async setupStart(engine='pdf2zh'){await this.ready;if(this.closed)throw new Error('插件正在关闭。');
+    if(this.active||this.busy||this.review.active())throw new Error('翻译或核验任务运行中，暂不能准备环境。');
+    return this.setup.start(engine);}
   async setupCancel(){await this.ready;return this.setup.cancel();}
   async saveConfig(input){await this.ready;if(this.closed)throw new Error('插件正在关闭。');return this.setup.saveConfig(input);}
   panel(owner, section='translation', visible=true){
@@ -87,14 +95,18 @@ export class TranslatorManager {
   }
   async start(input, owner, exec={}) {
     const args=translateSchema.parse(input); await this.ready;
+    args.engine ??= this.state.engine || 'pdf2zh';
+    if(args.engine==='pdf2zh' && (args.aiReview || args.renderOnly || args.imageQuality || args.thinking))throw new Error('AI 核验、图片质量、思考及缓存重排选项仅适用于 OCR 模式。');
+    args.aiReview=args.engine==='ocr' && (args.aiReview??this.state.aiReview);
     if(this.closed) throw new Error('插件正在关闭。');
     if(this.active) {
       if(this.active.owner===owner) return {background:true,jobId:this.active.id,existing:true};
       throw new Error('已有其他会话的翻译任务运行，请等待完成。');
     }
-    if(this.busy||this.setup.running) throw new Error('正在准备任务或环境，请稍后再试。');
-    if(this.setup.prime) await this.setup.prime();
-    if(!this.setup.snapshot().ready){
+    if(this.busy||this.review.active()||this.setup.running) throw new Error('正在准备任务、核验或清理缓存，请稍后再试。');
+    if(this.setup.prime)await this.setup.prime(args.engine);
+    const environment=this.setup.snapshot(args.engine);
+    if(!environment.ready && !(args.engine==='ocr' && args.renderOnly && environment.runtimeReady)){
       if(owner) this.panel(owner,'translation',true);
       throw new Error('首次使用需要准备运行环境并填写模型配置：请在 PDF 翻译面板点击“一键准备环境”。');
     }
@@ -106,8 +118,8 @@ export class TranslatorManager {
       if(this.closed) throw new Error('插件正在关闭。');
       args.pdf=inspected.path; args.outputDir=await this.outputDirectory(args.outputDir || this.state.outputDir);
       const identity=createHash('sha256').update(await fs.readFile(args.pdf)).digest('hex').slice(0,16);
-      const task={id:randomUUID(),owner:owner || '',identity,args,status:'preparing',startedAt:Date.now(),
-        progress:{phase:'preparing',percent:0,completed:0,total:inspected.selected_pages.length}};
+      const task={id:randomUUID(),owner:owner || '',identity,args,aiReview:args.aiReview,status:'preparing',startedAt:Date.now(),
+        progress:{phase:'preparing',completed:0,total:inspected.selected_pages.length,cached:0}};
       const controller=new AbortController(); this.controllers.add(controller);
       const run=(handle)=>{
         task.id=handle?.id || task.id; task.status='running'; this.active=task; this.state.tasks.push(task);
@@ -121,9 +133,10 @@ export class TranslatorManager {
               const now=Date.now();
               if(now-lastWrite>500 || p.phase==='completed') {lastWrite=now;handle?.updateProgress(progressText(p));void this.persist().catch(()=>{});}
             });
-            task.result={...result,jobId:task.id,completionPolicy:completionPolicy()};
-            task.status='completed';
-            return {status:'completed',result:JSON.stringify(task.result),detail:'PDF 已生成；只读取一次结果，简要回复并附 mono 与 dual 两个 PDF 链接'};
+            task.result={...result,jobId:task.id,engine:args.engine,aiReview:task.aiReview,completionPolicy:completionPolicy(task.aiReview,args.engine)};
+            task.status=task.aiReview?'reviewing':'completed';
+            if(task.aiReview)task.review={status:'pending',rounds:0,version:null};
+            return {status:'completed',result:JSON.stringify(task.result),detail:task.aiReview?'PDF 已生成；请用 pdf_review 核验，最多修复两轮':'翻译完成；按 completionPolicy 附上该引擎的输出链接'};
           } catch(e){task.status=controller.signal.aborted || exec.signal?.aborted && args.background===false?'killed':'failed';task.error=e.message;
             return {status:task.status,detail:e.message};
           } finally {task.finishedAt=Date.now();this.active=null;this.controllers.delete(controller);await this.persist();}
@@ -150,24 +163,27 @@ export class TranslatorManager {
   }
   async cancel(owner,id){await this.ready;const task=this.state.tasks.find(t=>t.id===id&&t.owner===owner);
     if(!task)throw new Error('找不到当前会话的任务。');
+    if(['reviewing','repairing'].includes(task.status))return this.review.cancel(task);
     if(!activeStates.has(task.status))return {status:task.status};
     this.ctx.get('jobs').kill(id,owner,'用户取消');return {status:'stopping'};
   }
-  async caches(){await this.ready;const result=await this.runner({operation:'cacheList'},this.config);
-    return {entries:result.entries.map(r=>({...r,busy:this.active?.identity===r.id})),cleaningDisabled:Boolean(this.active||this.busy)};}
+  async caches(){await this.ready;const pdf=await this.runner({operation:'cacheList',engine:'pdf2zh'},this.config);
+    const ocr=await this.runner({operation:'cacheList',engine:'ocr'},this.config);
+    const result={entries:[...pdf.entries.map(r=>({...r,engine:'pdf2zh'})),...ocr.entries.map(r=>({...r,id:'ocr:'+r.id,engine:'ocr'}))]};
+    return {entries:result.entries.map(r=>({...r,busy:this.active?.identity===r.id.replace(/^ocr:/,'')||this.review.active()?.identity===r.id.replace(/^ocr:/,'')})),cleaningDisabled:Boolean(this.active||this.busy||this.review.active())};}
   async prepareClear(identity){
     const {entries}=await this.caches();const row=entries.find(r=>r.id===identity);
-    if(!row)throw new Error('该缓存不存在。');
-    if(row.blocked||this.active||this.busy)throw new Error(row.blocked || '请等待翻译任务结束后清理缓存。');
+    if(!row)throw new Error('该文档缓存不存在。');
+    if(row.blocked||this.active||this.busy||this.review.active())throw new Error(row.blocked || '请等待翻译任务结束后清理缓存。');
     const token=randomUUID();this.tokens.set(token,{identity,expires:Date.now()+120000});
-    return {...row,token,message:'清理后再次翻译可能重新调用模型。原 PDF 和导出成果会保留。'};
+    return {...row,token,message:'清理后再次翻译可能重新调用 AI。原 PDF 和导出成果会保留。'};
   }
   async clear(identity,token){
     const choice=this.tokens.get(token);this.tokens.delete(token);
-    if(!choice||choice.identity!==identity||choice.expires<Date.now())throw new Error('清理确认已过期，请重新选择。');
-    if(this.active||this.busy)throw new Error('翻译运行中，暂不能清理缓存。');
+    if(!choice||choice.identity!==identity||choice.expires<Date.now())throw new Error('清理确认已过期，请重新选择文档。');
+    if(this.active||this.busy||this.review.active())throw new Error('翻译运行中，暂不能清理缓存。');
     this.busy=true;
-    try{return await this.runner({operation:'cacheClear',identity},this.config);}finally{this.busy=false;}
+    try{return await this.runner({operation:'cacheClear',engine:identity.startsWith('ocr:')?'ocr':'pdf2zh',identity:identity.replace(/^ocr:/,'')},this.config);}finally{this.busy=false;}
   }
   async browse(folder, directories=false){
     if(folder===''){
@@ -181,5 +197,5 @@ export class TranslatorManager {
     return {path:folder,parent:path.dirname(folder)===folder?'':path.dirname(folder),truncated:all.length>500,
       entries:all.slice(0,500).map(d=>({name:d.name,path:path.join(folder,d.name),directory:d.isDirectory()}))};
   }
-  async dispose(){this.closed=true;this.setup.cancel();this.pickerController?.abort();for(const c of this.controllers)c.abort();await this.pending;await this.writeChain;}
+  async dispose(){this.closed=true;this.setup.cancel();this.pickerController?.abort();for(const c of this.controllers)c.abort();await this.pending;await this.review.pending;await this.writeChain;}
 }

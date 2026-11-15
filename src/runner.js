@@ -22,7 +22,7 @@ export function runPython(request, config = {}, signal, onProgress) {
   const runtimeDir = resolveRuntimeDir(config, dataDir);
   const python = pythonPath(config);
   return new Promise((resolve, reject) => {
-    const child = spawn(python, ['-u', path.join(root, 'work/cli.py')], {
+    const child = spawn(python, ['-u', path.join(root, request.engine === 'ocr' ? 'work/ocr/cli.py' : 'work/cli.py')], {
       cwd: root, windowsHide: true, shell: false,
       env: {
         ...process.env,

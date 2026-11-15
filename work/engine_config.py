@@ -37,6 +37,7 @@ def load_config(path):
     config = json.loads(path.read_text('utf-8-sig')) if path.exists() else {}
     if not isinstance(config, dict):
         raise ValueError('config.json 顶层必须是对象。')
+    config = {**config, **config.get('engines', {}).get('pdf2zh', {})}
     for field, name in _ENV.items():
         if os.environ.get(name):
             config[field] = os.environ[name]

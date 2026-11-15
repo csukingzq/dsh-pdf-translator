@@ -14,12 +14,14 @@ const PHASE_TEXT = {
   python: '创建 Python 环境…',
   dependencies: '安装 Python 依赖…',
   engine: '安装翻译引擎（pdf2zh-next）…',
+  tectonic:'下载 Tectonic…', pandoc:'下载 Pandoc…',
   done: '环境已就绪',
 };
 const PHASE_RULES = [
   [/Creating Python environment/i, 'python'],
   [/Installing Python dependencies/i, 'dependencies'],
   [/Installing the translation engine/i, 'engine'],
+  [/Downloading tectonic/i,'tectonic'], [/Downloading pandoc/i,'pandoc'],
   [/PDF translator environment is ready/i, 'done'],
 ];
 const PROBE_CODE = "import importlib.metadata as m; print(m.version('pdf2zh-next'))";
@@ -42,6 +44,7 @@ function phaseFor(line) {
 export class SetupController {
   constructor(config = {}, options = {}) {
     this.config = config;
+    this.profile = options.profile;
     this.platform = options.platform || process.platform;
     this.dataDir = path.resolve(options.dataDir || resolveDataDir(config));
     this.configPath = path.resolve(options.configPath || resolveConfigPath(config, this.dataDir));
@@ -68,7 +71,7 @@ export class SetupController {
   }
 
   markerPath() {
-    return path.join(this.runtimeDir, 'pdf2zh.json');
+    return path.join(this.runtimeDir, this.profile==='ocr'?'ocr.json':'pdf2zh.json');
   }
 
   marker() {
@@ -95,6 +98,7 @@ export class SetupController {
   // Cheap readiness probe: the setup script's marker first, then one spawn of
   // the configured interpreter so an existing engine environment works too.
   prime() {
+    if(this.profile==='ocr' && this.engine.probed)return Promise.resolve(this.engine);
     if (this.probed) return this.probed;
     this.probed = this.probe().catch(() => {}).finally(() => { this.probed = null; });
     return this.probed;
@@ -117,7 +121,8 @@ export class SetupController {
     }
     let result;
     try {
-      result = await this.exec(python, ['-c', PROBE_CODE]);
+      const code=this.profile==='ocr' ? `import sys, os; sys.path.insert(0, ${JSON.stringify(path.join(root,'work/ocr'))}); os.environ['DSH_PDF_RUNTIME_DIR']=${JSON.stringify(this.runtimeDir)}; import pymupdf, bs4, tqdm; from latex_renderer import binaries; binaries(); print('1.0')` : PROBE_CODE;
+      result = await this.exec(python, ['-c', code]);
     } catch (error) {
       this.engine = { ready: false, version: '', error: '无法运行 Python：' + error.message, probed: true };
       return this.engine;
@@ -126,7 +131,7 @@ export class SetupController {
     if (result.code === 0 && /^\d+\.\d+/.test(version)) {
       this.engine = { ready: true, version, error: '', probed: true };
     } else {
-      this.engine = { ready: false, version: '', error: '未安装 pdf2zh-next 翻译引擎。', probed: true };
+      this.engine = { ready: false, version: '', error: this.profile==='ocr'?'未安装 OCR 依赖、Pandoc 或 Tectonic。':'未安装 pdf2zh-next 翻译引擎。', probed: true };
     }
     return this.engine;
   }
@@ -167,7 +172,8 @@ export class SetupController {
 
   configInfo() {
     const file = this.readConfigFile();
-    const value = file.value || {};
+    const legacy = file.value || {};
+    const value = {...legacy,...(this.profile ? legacy.engines?.[this.profile] : {})};
     return {
       baseUrl: typeof value.base_url === 'string' ? value.base_url : '',
       model: typeof value.model === 'string' ? value.model : '',
@@ -185,13 +191,14 @@ export class SetupController {
     const file = this.readConfigFile();
     if (file.error) throw new Error(file.error + ' 请修复或删除后重试。');
     const current = file.value || { ...DEFAULT_CONFIG };
-    const next = { ...current, base_url: baseUrl, model };
+    const selected=this.profile?{...current,...current.engines?.[this.profile]}:current;
+    const next = { ...(this.profile ? current.engines?.[this.profile] : current), base_url: baseUrl, model, api_key:selected.api_key };
     const apiKey = typeof input.apiKey === 'string' ? input.apiKey.trim() : '';
     if (apiKey) next.api_key = apiKey;
     if (!next.api_key) throw new Error('请填写 API 密钥。');
     fs.mkdirSync(path.dirname(this.configPath), { recursive: true });
     const temp = this.configPath + '.tmp';
-    fs.writeFileSync(temp, JSON.stringify(next, null, 2) + '\n', 'utf8');
+    fs.writeFileSync(temp, JSON.stringify(this.profile ? {...current,engines:{...current.engines,[this.profile]:next}} : next, null, 2) + '\n', 'utf8');
     fs.renameSync(temp, this.configPath);
     return this.configInfo();
   }
@@ -208,7 +215,8 @@ export class SetupController {
       error: marker.version ? '' : (this.engine.error || ''),
     };
     const file = this.readConfigFile();
-    const value = file.value || {};
+    const legacy = file.value || {};
+    const value = {...legacy,...(this.profile ? legacy.engines?.[this.profile] : {})};
     const baseUrl = typeof value.base_url === 'string' ? value.base_url.trim() : '';
     const model = typeof value.model === 'string' ? value.model.trim() : '';
     const hasApiKey = Boolean(value.api_key);
@@ -218,6 +226,7 @@ export class SetupController {
       platform: this.platform,
       platformOk,
       ready: platformOk && !missing.python && !missing.engine && !missing.model,
+      runtimeReady:platformOk && !missing.python && !missing.engine,
       running: this.running,
       phase: this.phase,
       message: this.message,

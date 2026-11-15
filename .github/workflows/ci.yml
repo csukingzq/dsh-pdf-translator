@@ -31,6 +31,12 @@ jobs:
       - name: Install bridge Python dependencies
         run: python -m pip install --disable-pip-version-check -r requirements.txt
 
+      - name: Prepare OCR renderer for integration tests
+        shell: powershell
+        run: |
+          ./scripts/setup-ocr.ps1 -DataDir "$env:RUNNER_TEMP/pdf-translator-test" -Python (Get-Command python).Source -OfficialOnly
+          "DSH_PDF_RUNTIME_DIR=$env:RUNNER_TEMP/pdf-translator-test/runtime" | Out-File -FilePath $env:GITHUB_ENV -Append
+
       - name: Build client bundle
         run: npm run build
 
@@ -41,7 +47,10 @@ jobs:
         run: npm test
 
       - name: Run Python tests
-        run: .venv\Scripts\python.exe -m unittest discover -s work -p "test_*.py"
+        run: |
+          python -m unittest discover -s work -p "test_*.py"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m unittest discover -s work/ocr -p "test_*.py"
 
       - name: Pack release artifact
         shell: powershell

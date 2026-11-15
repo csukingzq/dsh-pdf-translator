@@ -68,7 +68,7 @@ test('built panel: native selection, confirmation, validation, defaults, backgro
     fireEvent.change(view.getByLabelText('翻译页码'),{target:{value:'1,3,5-8'}});
     click('开始翻译');await waitFor(()=>view.getByText(/2\/6 段/));
     assert.ok(view.getByText(/50%/));
-    assert.deepEqual(requests.find(r=>r.action==='start').args,{pdf:'D:\\资料\\论文.pdf',pages:'1,3,5,6,7,8',workers:4,outputDir:'D:\\中文 输出'});
+    assert.deepEqual(requests.find(r=>r.action==='start').args,{pdf:'D:\\资料\\论文.pdf',pages:'1,3,5,6,7,8',workers:4,engine:'pdf2zh',outputDir:'D:\\中文 输出'});
     click('收起');assert.equal(view.container.querySelector('.pdf-entry').hidden,false);
     assert.equal(requests.some(r=>r.action==='cancel'),false);
     click('PDF 翻译 ·');await act(async()=>{});

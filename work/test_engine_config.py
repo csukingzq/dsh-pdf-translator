@@ -12,6 +12,18 @@ PREPARED = {'input': 'D:/runs/source.pdf', 'run_dir': 'D:/runs/run', 'engine_dir
 
 
 class LoadConfigTest(unittest.TestCase):
+    def test_dual_profiles_select_text_model_and_preserve_legacy_options(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'config.json'
+            path.write_text(json.dumps({**CONFIG, 'qps': 3, 'engines': {
+                'pdf2zh': {'model': 'text-new', 'api_key': 'text-key'},
+                'ocr': {'model': 'vision', 'api_key': 'vision-key'}}}), 'utf-8')
+            with mock.patch.dict(os.environ, {}, clear=True):
+                cfg = engine_config.load_config(path)
+            self.assertEqual(cfg['model'], 'text-new')
+            self.assertEqual(cfg['api_key'], 'text-key')
+            self.assertEqual(cfg['qps'], 3)
+
     def test_file_values(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'config.json'

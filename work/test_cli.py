@@ -57,9 +57,12 @@ class BridgeTest(unittest.TestCase):
         self.data.mkdir()
         self.modules = mock.patch.dict(sys.modules, {'pymupdf': fake_pymupdf()})
         self.modules.start()
+        self.repair = mock.patch('mathrepair.protect_variables', return_value=4)
+        self.protect = self.repair.start()
 
     def tearDown(self):
         self.modules.stop()
+        self.repair.stop()
         self.temp.cleanup()
 
     def execute(self, request, on_progress=None):
@@ -129,6 +132,9 @@ class BridgeTest(unittest.TestCase):
         self.assertTrue(diagnostics['formulaProtected'])
         self.assertEqual(diagnostics['suspiciousChars'], 9)
         self.assertIn('AdvMacMthSyN', seen['formular_font_pattern'])
+        self.assertTrue(seen['math_compatibility'])
+        self.assertEqual(diagnostics['protectedVariableRuns'], 4)
+        self.assertEqual(self.protect.call_args.args[1], [0, 1, 2])
         self.assertTrue(result['warnings'])
         self.assertIn('MathType', result['warnings'][0])
         report = json.loads(Path(result['report']).read_text('utf-8'))
@@ -167,6 +173,8 @@ class BridgeTest(unittest.TestCase):
             result = self.execute({'operation': 'translate', 'pdf': str(self.source),
                                    'outputDir': str(self.root / 'plain')})
         self.assertIsNone(seen['formular_font_pattern'])
+        self.assertFalse(seen['math_compatibility'])
+        self.protect.assert_not_called()
         self.assertFalse(result['diagnostics']['formulaProtected'])
         self.assertEqual(result['diagnostics']['mathFonts'], [])
         self.assertEqual(result['diagnostics']['suspiciousChars'], 0)

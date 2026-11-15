@@ -1,7 +1,18 @@
 {
-  "base_url": "https://api.deepseek.com/v1",
-  "model": "deepseek-chat",
-  "api_key": "",
+  "engines": {
+    "pdf2zh": {
+      "base_url": "https://api.deepseek.com/v1",
+      "model": "deepseek-chat",
+      "api_key": ""
+    },
+    "ocr": {
+      "base_url": "",
+      "model": "",
+      "api_key": ""
+    }
+  },
   "formular_font_pattern": "",
-  "formular_char_pattern": ""
+  "formular_char_pattern": "",
+  "thinking": "auto",
+  "auto_repair_rounds": 3
 }

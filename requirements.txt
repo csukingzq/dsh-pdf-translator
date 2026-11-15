@@ -1,2 +1,4 @@
 PyMuPDF>=1.24,<2
 pypdf>=5
+tqdm>=4.67,<5
+beautifulsoup4>=4.14,<5

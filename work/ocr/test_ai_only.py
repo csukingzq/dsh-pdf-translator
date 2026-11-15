@@ -1,0 +1,141 @@
+import json
+import tempfile
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+import document_pipeline as pipeline
+import pymupdf
+from cli import exclusive
+
+
+class AiOnlyTests(unittest.TestCase):
+    def test_extract_then_translate_and_offline_rerender(self):
+        source=Path(__file__).resolve().parents[2]/'tests/fixtures/vision-sample.pdf'
+        cfg={'base_url':'https://example.invalid/v1','api_key':'unused','model':'vision'}
+        data={'complete':True,'recognition_only':True,'semantic_document':True,'blocks':[
+            dict(kind='paragraph',bbox=[.1,.1,.9,.3],markdown='Source $x$¹',source_text='Source x¹',role_candidate='body'),
+            dict(kind='footnote',bbox=[.1,.8,.9,.9],markdown='[^1]: Note',source_text='1Note',role_candidate='footnote')]}
+        def render(text,cache,output):
+            output.write_bytes(source.read_bytes());project=output.with_suffix('');project.mkdir(parents=True,exist_ok=True)
+            (project/'main.tex').write_text(text,'utf-8');(project/'render-report.json').write_text('{}','utf-8')
+        def translate(llm,payload,error):
+            return {'units':[dict(id=u['id'],text='译文 '+u['text']) for u in payload['units']]}
+        with tempfile.TemporaryDirectory() as folder, patch.object(pipeline,'request_page',return_value=data) as extract, patch.object(pipeline,'request_translation',side_effect=translate) as translation, patch.object(pipeline,'render_latex',render):
+            first=pipeline.run_document(source,'1',cfg,workers=1,data_dir=folder)
+            self.assertTrue(extract.call_args.kwargs['recognition_only'])
+            self.assertEqual(translation.call_count,1)
+            extract.reset_mock();translation.reset_mock()
+            second=pipeline.run_document(source,'1',cfg,workers=1,data_dir=folder,render_only=True)
+            extract.assert_not_called();translation.assert_not_called()
+            a=json.loads(Path(first['document']).read_text('utf-8'))
+            b=json.loads(Path(second['document']).read_text('utf-8'))
+            self.assertEqual(a['pages'],b['pages'])
+            self.assertEqual(b['structure']['notes'][0]['anchors'],['p1-b1'])
+
+    def setUp(self):
+        reader = patch.object(pipeline, 'request_structure', side_effect=lambda llm, images: {
+            'pages':[dict(page=n,is_contents=False,printed_page='',regions=[],entries=[]) for n,_ in images]})
+        self.structure_reader = reader.start()
+        self.addCleanup(reader.stop)
+
+    def test_first_request_carries_original_and_coordinate_guide_in_one_call(self):
+        cfg = SimpleNamespace(base_url='https://example.invalid/v1', api_key='test-key', model='vision')
+        result = {'complete':True,'blocks':[{'kind':'figure','bbox':[.1,.1,.9,.9],'markdown':'距离'}]}
+        response = {'choices':[{'finish_reason':'stop','message':{'content':json.dumps(result)}}]}
+        with patch.object(pipeline, 'coordinate_reference', return_value=b'guide'), patch.object(pipeline, 'chat_json', return_value=response) as call:
+            pipeline.request_page(cfg, b'original', '', '')
+        self.assertEqual(call.call_count, 1)
+        content = call.call_args.args[1]['messages'][1]['content']
+        images = [c['image_url']['url'] for c in content if c['type']=='image_url']
+        self.assertEqual(len(images), 2)
+        self.assertTrue(images[0].endswith('b3JpZ2luYWw='))
+        self.assertTrue(images[1].endswith('Z3VpZGU='))
+
+    def test_coordinate_guide_preserves_source_dimensions(self):
+        with pymupdf.open() as doc:
+            page = doc.new_page(width=300,height=400)
+            page.insert_text((40,100),'Chart')
+            image = page.get_pixmap().tobytes('png')
+        guide = pymupdf.Pixmap(pipeline.coordinate_reference(image))
+        self.assertEqual((guide.width,guide.height),(300,400))
+
+
+    def test_unverified_figure_box_keeps_diagnostic_without_label_translation(self):
+        block = {'id':'p1-b1', 'page':1, 'kind':'figure', 'bbox':[.13,.22,.87,.71],
+                 'markdown':'Time：时间；Distance：距离。'}
+        with tempfile.TemporaryDirectory() as folder, patch.object(pipeline, 'crop') as crop:
+            source=Path(folder)/'source.pdf'
+            with pymupdf.open() as pdf:
+                pdf.new_page()
+                pdf.save(source)
+            text = pipeline.block_markdown(block, source, Path(folder))
+            self.assertEqual(crop.call_args.args[2], block['bbox'])
+            self.assertNotIn('Time：时间', text)
+            self.assertEqual(block['markdown'],'Time：时间；Distance：距离。')
+            audit=json.loads((Path(folder)/'crop-report.json').read_text('utf-8'))
+            self.assertEqual(audit['figures'][block['id']]['diagnostics'],['figure_native_geometry_unavailable'])
+
+    def test_missing_completeness_is_rejected(self):
+        cfg = SimpleNamespace(base_url='https://example.invalid/v1', api_key='test-key', model='vision')
+        response = {'choices':[{'finish_reason':'stop', 'message':{'content':json.dumps({'blocks':[
+            {'kind':'table','bbox':[0,0,1,1],'markdown':'|A|\n|---|\n|1|'}]})}}]}
+        with patch.object(pipeline, 'coordinate_reference', return_value=b'guide'), patch.object(pipeline, 'chat_json', return_value=response):
+            with self.assertRaisesRegex(ValueError, '未完整'):
+                pipeline.request_page(cfg, b'image', '', '')
+
+    def test_output_directory_lock_blocks_overlapping_runs_and_releases(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)
+            with exclusive(path):
+                with self.assertRaisesRegex(RuntimeError, '已有'):
+                    with exclusive(path):
+                        pass
+            with exclusive(path):
+                pass
+
+    def test_pdf_subset_cache_can_render_without_any_model_requests(self):
+        source = Path(__file__).resolve().parents[2]/'tests/fixtures/vision-sample.pdf'
+        cfg = {'base_url':'https://example.invalid/v1','api_key':'test-key','model':'vision'}
+        data = {'complete':True, 'blocks':[
+            # Tables keep the source language: the fixture page is English, so a
+            # table carried back in English must pass the language check.
+            {'kind':'table', 'bbox':[.1,.5,.9,.8], 'markdown':'| Time (s) | Distance (m) |\n|---|---|\n|0|1|'}]}
+        def fake_render(text, cache, output):
+            output = Path(output)
+            output.write_bytes(source.read_bytes())
+            project = output.with_suffix('')
+            project.mkdir(parents=True, exist_ok=True)
+            (project/'main.tex').write_text(text, encoding='utf-8')
+            (project/'render-report.json').write_text('{}', encoding='utf-8')
+        with tempfile.TemporaryDirectory() as folder, patch.object(pipeline, 'request_page', return_value=data) as request, patch.object(pipeline, 'render_latex', fake_render):
+            result = pipeline.run_document(source, '1', cfg, workers=1, data_dir=folder)
+            self.assertEqual(request.call_count, 1)
+            request.reset_mock()
+            self.structure_reader.reset_mock()
+            pipeline.run_document(source, 'all', cfg, workers=1, data_dir=folder, render_only=True)
+            request.assert_not_called()
+            self.structure_reader.assert_not_called()
+            report = json.loads(Path(result['report']).read_text('utf-8'))
+            self.assertEqual(report['ocr'], {'engines':[], 'available':False})
+            self.assertEqual(report['formula_review']['mode'], 'ai')
+
+    def test_font_warning_marks_translation_for_review(self):
+        source = Path(__file__).resolve().parents[2]/'tests/fixtures/vision-sample.pdf'
+        cfg = {'base_url':'https://example.invalid/v1','api_key':'unused','model':'vision'}
+        data = {'complete':True,'blocks':[{'kind':'paragraph','bbox':[.1,.2,.8,.3],'markdown':'中文'}]}
+        def render(text, cache, output):
+            output = Path(output)
+            output.write_bytes(source.read_bytes())
+            project = output.with_suffix(''); project.mkdir(parents=True, exist_ok=True)
+            (project/'main.tex').write_text(text, encoding='utf-8')
+            (project/'render-report.json').write_text(json.dumps({'font_warnings':['Missing character: U+1F984']}), encoding='utf-8')
+        with tempfile.TemporaryDirectory() as folder, patch.object(pipeline, 'request_page', return_value=data), patch.object(pipeline, 'render_latex', side_effect=render):
+            result = pipeline.run_document(source, 'all', cfg, workers=1, data_dir=folder)
+            self.assertEqual(result['status'], 'needs_review')
+            report = json.loads(Path(result['report']).read_text('utf-8'))
+            self.assertEqual(report['font_warnings'], ['Missing character: U+1F984'])
+
+
+if __name__ == '__main__':
+    unittest.main()
