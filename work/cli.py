@@ -176,7 +176,7 @@ def translate(request, data_dir, config_path, on_progress):
     if diagnostics['mathFonts'] or diagnostics['suspiciousChars']:
         warnings.append(
             '检测到 MathType/数学字体：行内公式可能无法完整重排。'
-            '如需公式正确，请使用 MinerU 引擎模式，或用 pages 排除相关页保留原文。')
+            '如需保留原文，可用 pages 参数排除相关页。')
 
     output_dir = Path(request.get('outputDir') or (data_dir / 'outputs')).expanduser().resolve()
     cache_root = (data_dir / 'work').resolve()
