@@ -124,7 +124,8 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual(result['status'], 'complete')
         self.assertTrue(Path(result['output']).is_file())
         self.assertTrue(Path(result['dual']).is_file())
-        self.assertTrue(Path(result['report']).is_file())
+        self.assertNotIn('report', result)
+        self.assertFalse((Path(result['output']).parent / 'report.json').exists())
         self.assertEqual(result['pages'], 3)
         self.assertEqual(events[0]['phase'], 'translating')
         diagnostics = result['diagnostics']
@@ -137,11 +138,10 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual(self.protect.call_args.args[1], [0, 1, 2])
         self.assertTrue(result['warnings'])
         self.assertIn('MathType', result['warnings'][0])
-        report = json.loads(Path(result['report']).read_text('utf-8'))
-        self.assertIn('AdvMacMthSyN', report['diagnostics']['mathFonts'])
-        self.assertTrue(report['warnings'])
-        rows = json.loads((self.data / 'work' / 'runs.json').read_text('utf-8'))
-        self.assertEqual(rows[0]['identity'], hashlib.sha256(self.source.read_bytes()).hexdigest()[:16])
+        identity = hashlib.sha256(self.source.read_bytes()).hexdigest()[:16]
+        self.assertEqual(Path(seen['cache_dir']), self.data / 'work/pdf2zh-cache' / identity)
+        rows = cache_ops.cache_list(self.data)
+        self.assertEqual(rows[0]['id'], identity)
         self.assertEqual(rows[0]['name'], 'paper.pdf')
 
     def test_plain_documents_keep_engine_defaults(self):
@@ -192,15 +192,15 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual(list(out.iterdir()) if out.exists() else [], [])
 
     def test_cache_list_and_clear(self):
-        engine = self.root / '.cache' / 'babeldoc'
-        engine.mkdir(parents=True)
-        (engine / 'cache.v1.db').write_bytes(b'x' * 10)
-        with mock.patch.object(cache_ops, 'engine_cache_dir', return_value=engine):
-            listed = self.execute({'operation': 'cacheList'})
-            self.assertIn('engine', [row['id'] for row in listed['entries']])
-            cleared = self.execute({'operation': 'cacheClear', 'identity': 'engine'})
+        identity = 'a' * 16
+        folder = cache_ops.prepare_cache(self.data, identity, self.source)
+        (folder / 'pdf2zh.v1.db').write_bytes(b'x' * 10)
+        listed = self.execute({'operation': 'cacheList'})
+        self.assertEqual([row['id'] for row in listed['entries']], [identity])
+        cleared = self.execute({'operation': 'cacheClear', 'identity': identity})
         self.assertTrue(cleared['cleared'])
-        self.assertFalse(engine.exists())
+        self.assertFalse(folder.exists())
+        self.assertTrue(self.source.exists())
 
 
 if __name__ == '__main__':

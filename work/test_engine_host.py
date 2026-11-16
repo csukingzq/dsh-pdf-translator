@@ -217,5 +217,32 @@ class EngineHostTest(unittest.TestCase):
             self.assertIn('一键准备环境', failures[0]['message'])
 
 
+class DocumentCacheTest(unittest.TestCase):
+    def test_host_binds_both_databases_and_scratch_to_document(self):
+        from types import ModuleType
+        from unittest import mock
+        import engine_host
+        modules = {}
+        for name in ['pdf2zh_next', 'pdf2zh_next.translator', 'pdf2zh_next.translator.cache',
+                     'babeldoc', 'babeldoc.translator', 'babeldoc.translator.cache']:
+            modules[name] = ModuleType(name)
+        caches = [modules['pdf2zh_next.translator.cache'], modules['babeldoc.translator.cache']]
+        for cache in caches:
+            cache.db = mock.Mock()
+            cache._TranslationCache = object()
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(sys.modules, modules), \
+                mock.patch.object(tempfile, 'tempdir', tempfile.tempdir):
+            folder = Path(tmp) / 'document'
+            engine_host.configure_cache(folder)
+            for name, cache in zip(['pdf2zh', 'babeldoc'], caches):
+                self.assertEqual(cache.db.mock_calls, [
+                    mock.call.close(),
+                    mock.call.init(str(folder / f'{name}.v1.db'),
+                                   pragmas={'journal_mode': 'wal', 'busy_timeout': 1000}),
+                    mock.call.create_tables([cache._TranslationCache], safe=True)])
+            with tempfile.TemporaryDirectory() as scratch:
+                self.assertTrue(Path(scratch).is_relative_to(folder / 'temporary'))
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -8,7 +8,7 @@ import React from 'react';import {createRoot} from 'react-dom/client';import {Pa
 const style=document.createElement('style');style.textContent=css;document.head.append(style);
 const store=createPanelState();store.set({sessionId:'test'});
 let engine='pdf2zh',aiReview=false;let task=null;window.fixture={store,start(){task={id:'preview',args:{pdf:'D:/资料/有限元特征值问题研究.pdf'},status:'running',progress:{phase:'translating',stage:'ILTranslator',percent:30,completed:7,total:23}};},compile(){task.progress.phase='typesetting';task.progress.percent=90;},finish(){task=null;}};
-const call=async r=>{if(r.action==='status')return {tasks:task?[task]:[],outputDir:'D:/中文输出',configured:true,busy:!!task,engine,aiReview};if(r.action==='settings'){engine=r.engine||engine;aiReview=r.aiReview??aiReview;return {engine,aiReview};}if(r.action==='pick')return {cancelled:false,path:'D:/资料/有限元特征值问题研究.pdf'};if(r.action==='inspect')return {path:r.pdf,pages:23,bytes:4096};if(r.action==='caches')return {entries:[{id:'engine',name:'翻译引擎共享缓存（BabelDOC）',bytes:4256000,blocked:''}],cleaningDisabled:!!task};throw Error(r.action);};
+const call=async r=>{if(r.action==='status')return {tasks:task?[task]:[],outputDir:'D:/中文输出',configured:true,busy:!!task,engine,aiReview};if(r.action==='settings'){engine=r.engine||engine;aiReview=r.aiReview??aiReview;return {engine,aiReview};}if(r.action==='pick')return {cancelled:false,path:'D:/资料/有限元特征值问题研究.pdf'};if(r.action==='inspect')return {path:r.pdf,pages:23,bytes:4096};if(r.action==='caches')return {entries:[{id:'aaaaaaaaaaaaaaaa',name:'paper.pdf',bytes:4256000,blocked:''}],cleaningDisabled:!!task};throw Error(r.action);};
 createRoot(document.getElementById('app')).render(React.createElement(Panel,{store,call}));
 `,resolveDir:process.cwd(),loader:'jsx'},bundle:true,write:false,format:'iife',platform:'browser',loader:{'.css':'text'}});
 await mkdir('verification',{recursive:true});
@@ -66,7 +66,7 @@ try{
   await page.waitForFunction(()=>{const b=document.querySelector('.pdf-panel').getBoundingClientRect();return b.right<=innerWidth&&b.bottom<=innerHeight;});
   await page.screenshot({path:'verification/panel-narrow.png'});
   await page.getByRole('button',{name:'清理缓存',exact:true}).click();await page.getByRole('dialog',{name:'清理缓存'}).waitFor();
-  assert.equal(await page.getByRole('button',{name:'清理引擎缓存'}).isEnabled(),false);
+  assert.equal(await page.getByRole('button',{name:'清理该文档缓存'}).isEnabled(),false);
   assert.ok(await page.locator('.pdf-dialog').evaluate(el=>el.getBoundingClientRect().right<=innerWidth));
   await page.screenshot({path:'verification/panel-cache.png'});await page.keyboard.press('Escape');
   await page.getByRole('button',{name:'收起'}).click();await drag(entry,1000,1000);let b=await entry.boundingBox();assert.ok(b.x+b.width<=260&&b.y+b.height<=420);

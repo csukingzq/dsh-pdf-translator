@@ -140,7 +140,6 @@ export function Panel({store,call,ensureSession}){
         <label htmlFor="pdf-engine">翻译引擎<select id="pdf-engine" value={engine} disabled={pending||state.busy} onChange={e=>{const value=e.target.value;action(async()=>{await call({action:'settings',engine:value});setOcrOptions(prev=>({...prev,renderOnly:false}));await refresh();});}}>
           <option value="pdf2zh">Zotero PDF2zh（推荐，保留版式）</option><option value="ocr">OCR 识图（LaTeX 重排）</option>
         </select></label>
-        <small>{isOcr?'适合扫描件和需要重排的文档；模型须支持图片输入。':'使用 pdf2zh-next / BabelDOC；保留公式和版式，输出单语及双语 PDF。'}</small>
         {isOcr&&<label><input type="checkbox" checked={state.aiReview===true} disabled={pending||state.busy} onChange={e=>{const aiReview=e.target.checked;action(async()=>{await call({action:'settings',aiReview});await refresh();});}}/>翻译后 AI 核验（最多修复两轮）</label>}
         {setup&&!setup.ready&&<div className="pdf-setup" role="status">
           {setup.running?<>
@@ -167,7 +166,6 @@ export function Panel({store,call,ensureSession}){
           <button disabled={pending} onClick={()=>{setDialog({kind:'cache'});setConfirmation(null);action(loadCaches);}}>清理缓存</button>
         </div>
         <PluginUpdatePanel visible={ui.visible} busy={pending||state.busy||Boolean(current)}/>
-        <small><a href="https://github.com/csukingzq/dsh-pdf-translator" target="_blank" rel="noreferrer">源码与许可证（AGPL-3.0）</a></small>
         {!dialog&&error&&<p role="alert" className="pdf-error">{error}</p>}
         {notice&&<small role="status">{notice}</small>}
         {pending&&!dialog&&<small>请完成系统选择窗口…</small>}
@@ -206,14 +204,14 @@ export function Panel({store,call,ensureSession}){
         <div className="pdf-dialog-actions"><button disabled={pending} onClick={close}>取消</button><button className="pdf-primary" disabled={pending||!configForm.baseUrl.trim()||!configForm.model.trim()||(!setup?.config?.hasApiKey&&!configForm.apiKey.trim())} onClick={()=>action(saveConfig)}>保存</button></div>
       </>}
       {dialog.kind==='cache'&&<>
-        <small>版式引擎使用共享缓存；OCR 缓存可按文档清理。原 PDF 与已导出成果不会删除。</small>
+        <small>按文档清理所有模型版本；原 PDF 和导出成果保留。</small>
         <button disabled={pending} onClick={()=>action(loadCaches)}>刷新列表</button>
         {(caches?.cleaningDisabled||state.busy)&&<small>翻译或取消任务尚未结束，暂不能清理。</small>}
-        {caches?.entries.length===0&&<small>没有缓存记录。</small>}
+        {caches?.entries.length===0&&<small>没有缓存。</small>}
         <div className="pdf-cache-list">{caches?.entries.map(row=><div className="pdf-cache" key={row.id}>
-          <strong title={row.source}>{row.name}</strong><small>{formatSize(row.bytes)} · {row.blocked?'受保护':row.id==='engine'?'可清理':'文档记录'}</small>
+          <strong title={row.source}>{row.name}</strong><small>{formatSize(row.bytes)} · {row.engine==='ocr'?'OCR':'PDF2zh'} · {row.busy?'使用中':row.blocked?'受保护':'未使用'}</small>
           {row.blocked&&<small>{row.blocked}</small>}
-          {(row.id==='engine'||row.engine==='ocr')&&<button disabled={pending||state.busy||caches.cleaningDisabled||!!row.blocked} onClick={()=>action(async()=>setConfirmation(await call({action:'prepareClear',identity:row.id})))}>{row.engine==='ocr'?'清理文档缓存':'清理引擎缓存'}</button>}
+          <button disabled={pending||state.busy||caches.cleaningDisabled||row.busy||!!row.blocked} onClick={()=>action(async()=>setConfirmation(await call({action:'prepareClear',identity:row.id})))}>清理该文档缓存</button>
         </div>)}</div>
         {confirmation&&<div className="pdf-confirm" role="alertdialog" aria-label="确认清理缓存">
           <strong>{confirmation.name} · {formatSize(confirmation.bytes)}</strong><p>{confirmation.message}</p>

@@ -35,8 +35,8 @@ test('built panel: native selection, confirmation, validation, defaults, backgro
     if(r.action==='inspect')return {path:r.pdf,pages:8,bytes:1024};
     if(r.action==='settings'){outputDir=r.outputDir??outputDir;return {outputDir,configured:true};}
     if(r.action==='start'){tasks=[{id:'job',args:r.args,status:'running',progress:{phase:'translating',stage:'ILTranslator',percent:50,completed:2,total:6}}];return {jobId:'job'};}
-    if(r.action==='caches')return {entries:[{id:'engine',name:'翻译引擎共享缓存（BabelDOC）',bytes:2048,blocked:''}],cleaningDisabled:tasks.length>0};
-    if(r.action==='prepareClear')return {id:r.identity,name:'翻译引擎共享缓存（BabelDOC）',bytes:2048,token:'confirmed',message:'原 PDF 和导出成果会保留。'};
+    if(r.action==='caches')return {entries:[{id:'aaaaaaaaaaaaaaaa',name:'paper.pdf',bytes:2048,blocked:''}],cleaningDisabled:tasks.length>0};
+    if(r.action==='prepareClear')return {id:r.identity,name:'paper.pdf',bytes:2048,token:'confirmed',message:'原 PDF 和导出成果会保留。'};
     if(r.action==='clear')return {cleared:true};
     throw Error('Unscripted action '+r.action);
   };
@@ -48,6 +48,8 @@ test('built panel: native selection, confirmation, validation, defaults, backgro
     assert.equal(view.container.querySelector('.pdf-entry').hidden,true);
     assert.equal(view.container.querySelectorAll('.pdf-actions button').length,4);
     assert.equal(view.queryByRole('switch'),null);
+    assert.equal(view.queryByText(/使用 pdf2zh-next \/ BabelDOC/),null);
+    assert.equal(view.queryByRole('link',{name:/源码与许可证/}),null);
     await choose();assert.equal(view.getByLabelText('翻译页码').value,'全部');
     assert.equal(requests.some(r=>r.action==='start'),false);
     click('取消');assert.equal(view.queryByRole('dialog'),null);
@@ -75,15 +77,15 @@ test('built panel: native selection, confirmation, validation, defaults, backgro
     const picks=requests.filter(r=>r.action==='pick').length;
     click('选择 PDF');await act(async()=>{});
     assert.equal(requests.filter(r=>r.action==='pick').length,picks);
-    click('清理缓存');await waitFor(()=>view.getByRole('button',{name:'清理引擎缓存'}));
-    assert.equal(view.getByRole('button',{name:'清理引擎缓存'}).disabled,true);
+    click('清理缓存');await waitFor(()=>view.getByRole('button',{name:'清理该文档缓存'}));
+    assert.equal(view.getByRole('button',{name:'清理该文档缓存'}).disabled,true);
     click('关闭窗口');
     tasks=[];click('收起');click('PDF 翻译 ·');await act(async()=>{});
-    click('清理缓存');await waitFor(()=>assert.equal(view.getByRole('button',{name:'清理引擎缓存'}).disabled,false));
-    click('清理引擎缓存');await waitFor(()=>view.getByRole('alertdialog'));
+    click('清理缓存');await waitFor(()=>assert.equal(view.getByRole('button',{name:'清理该文档缓存'}).disabled,false));
+    click('清理该文档缓存');await waitFor(()=>view.getByRole('alertdialog'));
     assert.equal(requests.some(r=>r.action==='clear'),false);
     click('取消');assert.equal(requests.some(r=>r.action==='clear'),false);
-    click('清理引擎缓存');await waitFor(()=>view.getByRole('alertdialog'));click('确认清理');
+    click('清理该文档缓存');await waitFor(()=>view.getByRole('alertdialog'));click('确认清理');
     await waitFor(()=>assert.equal(requests.filter(r=>r.action==='clear').length,1));
     assert.equal(requests.find(r=>r.action==='clear').token,'confirmed');
     await waitFor(()=>assert.equal(view.getByRole('button',{name:'关闭窗口'}).disabled,false));click('关闭窗口');

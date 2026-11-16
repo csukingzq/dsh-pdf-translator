@@ -24,6 +24,7 @@ class MathRulesTest(unittest.TestCase):
         self.assertTrue(solid_rule_mask(mask, matrix))
         self.assertFalse(solid_rule_mask(mask, (0.4, 0, 0, -30, 10, 20)))
         self.assertFalse(solid_rule_mask(mask, (30, 1, 0, -0.4, 10, 20)))
+        self.assertFalse(solid_rule_mask(mask, (240, 0, 0, -0.4, 10, 20)))
         self.assertFalse(solid_rule_mask({**mask, 'data': b'\x80'}, matrix))
         inverted = {'settings': {**settings, '/D': [1, 0]}, 'data': b'\x80'}
         self.assertTrue(solid_rule_mask(inverted, matrix))
@@ -108,7 +109,9 @@ class MathRulesTest(unittest.TestCase):
                 b'q [] 0 d 0 J 0 w 10 30 m 50 30 l S Q '
                 b'q [] 0 d 0 J 0.4 w 10 40 m 50 45 l S Q '
                 b'q 0.5 G [] 0 d 0 J 0.4 w 10 50 m 50 50 l S Q '
-                b'q /Alpha gs [] 0 d 0 J 0.4 w 10 60 m 50 60 l S Q'))
+                b'q /Alpha gs [] 0 d 0 J 0.4 w 10 60 m 50 60 l S Q '
+                b'q [] 0 d 0 J 0.4 w 10 90 m 250 90 l S Q '
+                b'q 10 70 m 30 80 l [] 0 d 0 J 0.4 w 10 80 m 50 80 l S Q'))
             page[NameObject('/Resources')] = DictionaryObject({NameObject('/ExtGState'):
                 DictionaryObject({NameObject('/Alpha'): DictionaryObject({
                     NameObject('/CA'): FloatObject(0.5)})})})

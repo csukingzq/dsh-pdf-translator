@@ -1,6 +1,6 @@
 {
   "name": "dsh-pdf-translator",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Dual-engine PDF translation for DeepSeek Harness: pdf2zh-next / BabelDOC and vision OCR with LaTeX",
   "type": "module",
   "main": "src/index.js",

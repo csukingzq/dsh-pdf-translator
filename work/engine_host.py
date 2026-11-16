@@ -15,6 +15,7 @@ import asyncio
 import contextlib
 import json
 import sys
+import tempfile
 import time
 import traceback
 from pathlib import Path
@@ -101,6 +102,8 @@ def settings_from(request):
 async def translate(request):
     from pdf2zh_next.high_level import do_translate_async_stream
 
+    if request.get('cache_dir'):
+        configure_cache(request['cache_dir'])
     settings, host = settings_from(request)
     stream = (translate_math(settings, host, request.get('math_compatibility', False))
               if request.get('math_compatibility') or request.get('structured_layout')
@@ -114,6 +117,28 @@ async def translate(request):
         if kind in progress.PROGRESS_TYPES:
             emit({'type': 'progress', **progress.map_event(event)})
     raise RuntimeError('翻译引擎没有返回结果。')
+
+
+def configure_cache(folder):
+    """Isolate translation databases, while retaining shared models and fonts.
+
+    The bridge runs one document per host process. Rebind both pinned engines'
+    databases before creating any translators or starting worker threads.
+    """
+    from pdf2zh_next.translator import cache as pdf_cache
+    from babeldoc.translator import cache as babel_cache
+
+    folder = Path(folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    # Include interrupted engine scratch files in the same document's cleanup.
+    temporary = folder / 'temporary'
+    temporary.mkdir(exist_ok=True)
+    tempfile.tempdir = str(temporary)
+    for name, cache in [('pdf2zh', pdf_cache), ('babeldoc', babel_cache)]:
+        cache.db.close()
+        cache.db.init(str(folder / f'{name}.v1.db'),
+                      pragmas={'journal_mode': 'wal', 'busy_timeout': 1000})
+        cache.db.create_tables([cache._TranslationCache], safe=True)
 
 
 async def translate_math(settings, host, math_compatibility=True):

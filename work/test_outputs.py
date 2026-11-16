@@ -31,7 +31,7 @@ class OutputTest(unittest.TestCase):
         self.assertEqual(prepared['engine_dir'], prepared['run_dir'] / '_engine')
         self.assertTrue(prepared['run_dir'].name.startswith('有限元特征值问题研究_'))
 
-    def test_collect_moves_files_and_writes_report(self):
+    def test_collect_exports_only_pdfs(self):
         prepared = outputs.prepare(self.root / 'out', self.source)
         engine = prepared['engine_dir']
         engine.mkdir(parents=True)
@@ -51,16 +51,11 @@ class OutputTest(unittest.TestCase):
         self.assertEqual(Path(result['output']).name, '有限元特征值问题研究-mono.pdf')
         self.assertFalse(engine.exists())
         self.assertFalse(prepared['input'].exists())
-        report = json.loads(Path(result['report']).read_text('utf-8'))
-        self.assertEqual(report['status'], 'complete')
-        self.assertEqual(report['engine'], 'pdf2zh-next')
-        self.assertEqual(report['langOut'], 'zh-CN')
-        self.assertEqual(report['model'], 'text-model')
-        self.assertEqual(report['diagnostics']['mathFonts'], ['AdvMacMthSyN'])
-        self.assertTrue(report['diagnostics']['formulaProtected'])
-        self.assertEqual(report['warnings'], [])
-        self.assertGreater(result['bytes'], 0)
-        self.assertEqual(Path(result['report']).parent, run)
+        self.assertNotIn('report', result)
+        self.assertEqual(result['bytes'], 8)
+        self.assertEqual({p.name for p in run.iterdir()},
+                         {'有限元特征值问题研究-mono.pdf', '有限元特征值问题研究-dual.pdf'})
+        self.assertEqual(self.source.read_bytes(), b'%PDF-1.4 source')
 
     def test_collect_tolerates_missing_dual(self):
         prepared = outputs.prepare(self.root / 'out', self.source)

@@ -6,7 +6,6 @@ names its output after the input file: long Chinese titles plus
 The copy also guarantees that an output directory equal to the source's
 directory can never overwrite the original.
 """
-import json
 import os
 import re
 import shutil
@@ -16,7 +15,6 @@ from pathlib import Path
 
 _INVALID = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 _STEM_LIMIT = 48
-_REPORT = 'report.json'
 
 
 def safe_stem(name):
@@ -68,52 +66,19 @@ def _move(source, target):
     return target
 
 
-def _report(prepared, result, meta):
-    mono, dual, report = (meta.get('output'), meta.get('dual'), meta.get('report'))
-    payload = {
-        'status': 'complete',
-        'source': str(meta.get('source') or ''),
-        'output': str(mono or ''),
-        'dual': str(dual or ''),
-        'pages': str(meta.get('pages') or 'all'),
-        'selectedPages': int(meta.get('selected_pages') or 0),
-        'engine': 'pdf2zh-next',
-        'engineVersion': str(result.get('version') or ''),
-        'langIn': str(result.get('lang_in') or ''),
-        'langOut': str(result.get('lang_out') or ''),
-        'model': str(meta.get('model') or ''),
-        'baseUrl': str(meta.get('base_url') or ''),
-        'seconds': round(float(result.get('seconds') or 0), 2),
-        'tokenUsage': result.get('token_usage') or {},
-        'diagnostics': meta.get('diagnostics') or {},
-        'warnings': meta.get('warnings') or [],
-        'createdAt': time.strftime('%Y-%m-%dT%H:%M:%S%z'),
-    }
-    Path(report).write_text(json.dumps(payload, ensure_ascii=False, indent=2), 'utf-8')
-    return payload
-
-
 def collect(prepared, result, meta):
-    """Move the engine's PDFs into the run folder and write report.json.
-
-    Raises when the engine produced no PDF at all; a missing dual is tolerated
-    because BabelDOC skips it for some documents, and report.json records which
-    files exist.
-    """
+    """Collect only the PDFs; tolerate engines that omit the dual output."""
     run_dir = Path(prepared['run_dir'])
     stem = prepared['stem']
     mono = _move(result.get('mono'), run_dir / f'{stem}-mono.pdf')
     dual = _move(result.get('dual'), run_dir / f'{stem}-dual.pdf')
     if not mono and not dual:
         raise RuntimeError('翻译进程结束但未生成 PDF。' + (('\n引擎输出：' + result['tail']) if result.get('tail') else ''))
-    report = run_dir / _REPORT
-    _report(prepared, result, {**meta, 'output': mono, 'dual': dual, 'report': report})
     _cleanup(prepared)
     return {
         'output': str(mono) if mono else '',
         'dual': str(dual) if dual else '',
-        'report': str(report),
-        'bytes': sum(path.stat().st_size for path in (mono, dual, report) if path and path.exists()),
+        'bytes': sum(path.stat().st_size for path in (mono, dual) if path and path.exists()),
     }
 
 

@@ -33,7 +33,7 @@ export function apply(ctx, config = {}) {
     exec.signal ? AbortSignal.any([exec.signal, controller.signal]) : controller.signal);
   ctx.tools.register(defineTool({
     name: 'pdf_translate',
-    description: '支持两种引擎。engine=ocr 保留视觉模型识图、LaTeX 重排、可编辑源码、逐文档缓存和可选 AI 核验，需要支持图片输入的模型；输出 output/project 等。默认推荐用 pdf2zh-next / BabelDOC 将 PDF 翻译成中文，保留原版式（公式、图表、目录、双栏原位替换），输出单语译文 PDF（mono）和双语对照 PDF（dual）。每次任务新建一个输出子目录，里面是 mono、dual 两个 PDF 和 report.json。只翻译并输出指定页码，例如 2-4 输出 3 页；表格单元格文字默认不翻译；扫描件需要先有文本层。首次使用必须先准备运行环境并填写模型配置：失败时按提示引导用户打开 PDF 翻译面板完成，不要尝试在终端手改配置。翻译会把原文发送到用户配置的模型接口并产生 API 费用，大文档耗时较长；建议先指定少量 pages 试跑。成功后遵循结果 completionPolicy；仅 OCR 可开启 AI 核验。',
+    description: '支持两种引擎。engine=ocr 保留视觉模型识图、LaTeX 重排、可编辑源码、逐文档缓存和可选 AI 核验，需要支持图片输入的模型；输出 output/project 等。默认推荐用 pdf2zh-next / BabelDOC 将 PDF 翻译成中文，保留原版式（公式、图表、目录、双栏原位替换），输出单语译文 PDF（mono）和双语对照 PDF（dual）。每次任务新建一个输出子目录，推荐引擎仅导出 mono、dual 两个 PDF。只翻译并输出指定页码，例如 2-4 输出 3 页；表格单元格文字默认不翻译；扫描件需要先有文本层。首次使用必须先准备运行环境并填写模型配置：失败时按提示引导用户打开 PDF 翻译面板完成，不要尝试在终端手改配置。翻译会把原文发送到用户配置的模型接口并产生 API 费用，大文档耗时较长；建议先指定少量 pages 试跑。成功后遵循结果 completionPolicy；仅 OCR 可开启 AI 核验。',
     parameters: {
       engine:{...string,enum:['pdf2zh','ocr'],description:'pdf2zh（推荐，保留版式）或 ocr（视觉识别与 LaTeX 重排）；省略使用面板设置，初始 pdf2zh。'},
       aiReview:{type:'boolean',description:'仅 OCR 模式支持，翻译后由当前会话 AI 核验并最多修复两轮'},
@@ -80,7 +80,7 @@ export function apply(ctx, config = {}) {
     },
   }));
   ctx.tools.register(defineTool({
-    name:'pdf_cache_list', description:'只读查看 PDF 翻译缓存。翻译引擎共享缓存只能由用户打开 PDF 翻译面板、打开缓存窗口并确认后清理；不要用文件工具代替用户删除缓存。',
+    name:'pdf_cache_list', description:'只读查看两种引擎的逐文档翻译缓存。缓存只能由用户打开 PDF 翻译面板、打开缓存窗口并确认后清理；不要用文件工具代替用户删除缓存。',
     parameters:{}, output:output({entries:{type:'array',items:{type:'object',properties:{},additionalProperties:true}}}),
     execute:()=>manager.caches(),
   }));

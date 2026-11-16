@@ -29,7 +29,7 @@ function controlledRunner(){
     run:async(r,c,signal,onProgress)=>{
       calls.push(r);
       if(r.operation==='inspect')return {path:fixture,pages:1,selected_pages:[1]};
-      if(r.operation==='cacheList')return {entries:[{id:'engine',name:'翻译引擎共享缓存（BabelDOC）',bytes:1,blocked:''}]};
+      if(r.operation==='cacheList')return {entries:[{id:'aaaaaaaaaaaaaaaa',name:'paper.pdf',bytes:1,blocked:''}]};
       if(r.operation==='cacheClear')return {cleared:true};
       progress=onProgress;
       return new Promise((a,b)=>{resolve=a;reject=b;signal?.addEventListener('abort',()=>reject(new Error('cancelled')),{once:true});});
@@ -63,7 +63,7 @@ test('native Harness job: ownership, progress, duplicate prevention, and chat ca
   await m.settings(path.join(dir,'新的输出目录'));
   assert.equal((await m.status('session-a')).tasks[0].args.outputDir,originalOutput);
   assert.equal(runner.calls.find(r=>r.operation==='translate').outputDir,originalOutput);
-  await assert.rejects(m.prepareClear('engine'),/结束/);
+  await assert.rejects(m.prepareClear('aaaaaaaaaaaaaaaa'),/结束/);
   runner.complete({output:'translated.pdf',dual:'translated-dual.pdf',status:'complete'});
   await m.pending;await pause();
   assert.equal(ctx.jobs.get(result.jobId,'session-a').status,'completed');
@@ -86,8 +86,8 @@ test('output defaults persist; cache deletion requires a fresh one-use user conf
   const resolvedChosen=await fs.realpath(chosen);
   assert.equal((await m.status()).outputDir,resolvedChosen);
   await assert.rejects(m.outputDirectory(path.join(dir,'work/nested')),/工作目录/);
-  await assert.rejects(m.clear('engine','made-up'),/确认/);
-  const selection=await m.prepareClear('engine');
+  await assert.rejects(m.clear('aaaaaaaaaaaaaaaa','made-up'),/确认/);
+  const selection=await m.prepareClear('aaaaaaaaaaaaaaaa');
   assert.equal((await m.clear(selection.id,selection.token)).cleared,true);
   await assert.rejects(m.clear(selection.id,selection.token),/确认/);
   const restored=new TranslatorManager(ctx,{dataDir:dir},runner.run,undefined,readySetup());await restored.ready;

@@ -53,16 +53,19 @@ test('per-engine model edits preserve legacy settings, both keys and unknown opt
   assert.doesNotMatch(JSON.stringify(setup.snapshots()),/secret/);
 });
 
-test('cache confirmations route OCR document caches separately from shared layout caches',async t=>{
+test('cache confirmations isolate the two engines for the same document',async t=>{
   const dir=await temporary(t),calls=[],identity='a'.repeat(16);
-  const runner=async r=>{calls.push(r);return r.operation==='cacheList'?{entries:[{id:r.engine==='ocr'?identity:'engine',name:'cache',bytes:1}]}:{cleared:true};};
+  const runner=async r=>{calls.push(r);return r.operation==='cacheList'?{entries:[{id:identity,name:'cache',bytes:1}]}:{cleared:true};};
   const manager=new TranslatorManager({get:()=>null},{dataDir:dir},runner,undefined,{running:false,cancel(){}});
   t.after(()=>manager.dispose());
-  const rows=(await manager.caches()).entries;assert.deepEqual(rows.map(r=>r.id),['engine','ocr:'+identity]);
+  const rows=(await manager.caches()).entries;assert.deepEqual(rows.map(r=>r.id),[identity,'ocr:'+identity]);
   const choice=await manager.prepareClear('ocr:'+identity);
   await manager.clear(choice.id,choice.token);
   assert.deepEqual(calls.at(-1),{operation:'cacheClear',engine:'ocr',identity});
   await assert.rejects(manager.clear(choice.id,choice.token),/过期/);
+  const pdfChoice=await manager.prepareClear(identity);
+  await manager.clear(identity,pdfChoice.token);
+  assert.deepEqual(calls.at(-1),{operation:'cacheClear',engine:'pdf2zh',identity});
 });
 
 test('real Python subprocesses inspect with both isolated entry points',async()=>{

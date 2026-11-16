@@ -1,6 +1,6 @@
 # DeepSeek Harness PDF 翻译插件
 
-**1.1.0：双翻译引擎。** 保留原 OCR 识图与 LaTeX 重排功能，新增默认推荐的 Zotero PDF2zh 路线（实际运行 pdf2zh-next / BabelDOC）。支持后台任务、页码选择、取消、缓存、插件更新和独立模型配置。
+**1.1.1：公式修复与逐文档缓存。** 保留原 OCR 识图与 LaTeX 重排功能，新增默认推荐的 Zotero PDF2zh 路线（实际运行 pdf2zh-next / BabelDOC）。支持后台任务、页码选择、取消、缓存、插件更新和独立模型配置。
 
 | 引擎 | 适用文档与处理方式 | 输出 | AI 核验 |
 | --- | --- | --- | --- |
@@ -13,7 +13,7 @@
 
 需要 Windows 10/11、DSH 0.2.1-rc.3 或更新的 0.2.x、Python 3.10–3.13（可使用 DSH 自带 Python）。
 
-1. 在 DSH **插件 → 添加插件** 中安装 `dsh-pdf-translator@1.1.0`；也可下载 [GitHub Release 安装包](https://github.com/csukingzq/dsh-pdf-translator/releases/latest/download/dsh-pdf-translator.tgz)。
+1. 在 DSH **插件 → 添加插件** 中安装 `dsh-pdf-translator@1.1.1`；也可下载 [GitHub Release 安装包](https://github.com/csukingzq/dsh-pdf-translator/releases/latest/download/dsh-pdf-translator.tgz)。
 2. 启用插件并打开 **PDF 翻译** 面板，选择引擎。默认推荐 Zotero PDF2zh。
 3. 点 **一键准备环境**，只安装所选引擎需要的组件。Python 依赖优先使用清华、阿里镜像，失败回退官方 PyPI。Pandoc/Tectonic 无可验证的国内镜像时使用官方发行文件。
 4. 在 **模型配置** 中填写 OpenAI 兼容接口、模型和密钥。OCR 必须使用支持图片输入的视觉模型；推荐引擎可使用 DeepSeek 等文本模型。两套配置分别保存。
@@ -24,7 +24,7 @@
 CLI 安装示例：
 
 ```powershell
-npx.cmd @deepseek-ai/dsh plugin --profile web add dsh-pdf-translator@1.1.0
+npx.cmd @deepseek-ai/dsh plugin --profile web add dsh-pdf-translator@1.1.1
 ```
 
 ## 页码、结果和缓存
@@ -32,8 +32,8 @@ npx.cmd @deepseek-ai/dsh plugin --profile web add dsh-pdf-translator@1.1.0
 - 页码支持留空、`all`、`2-4`、`1,3,5-8`，使用 PDF 的物理页序号。
 - 推荐引擎选 `2-4` 时，mono 和左右对照 dual **各只保留所选的 3 页**。保留页面内原印刷页码。
 - OCR 仅处理所选原文页；LaTeX 重排后的输出页数可能变化，不承诺原页数。
-- 每次任务在输出目录中新建一个子文件夹。推荐引擎包含 mono、dual、report.json；OCR 保留旧版可编辑源码和诊断成果。
-- 推荐引擎使用 BabelDOC 共享翻译缓存；OCR 保留 `work/document-cache` 逐文档缓存和离线重排。面板区分两者，清理须用户确认，原 PDF 和导出成果保留。
+- 每次任务在输出目录中新建一个子文件夹。推荐引擎仅导出 mono、dual 两份 PDF，不生成 report.json；OCR 保留旧版可编辑源码和诊断成果。
+- 两种引擎均按文档列出缓存，清理须用户确认，按文档清理所有模型版本，原 PDF 和导出成果保留。PDF2zh 使用 `work/pdf2zh-cache`，包含翻译数据库和中断后可能残留的临时文件；OCR 保留 `work/document-cache` 和离线重排。共享模型、字体不在清理范围内。1.1.0 的共享缓存不会自动删除或迁移，新版首次翻译会重新建立文档缓存。
 - OCR AI 核验由当前 DSH 会话执行，通过 `pdf_review` 检查覆盖率、预览并修复，最多两轮。未完成或存在遗留问题会如实报告。推荐引擎在界面和后端均禁止该核验流程。
 
 ## 升级与配置
@@ -63,7 +63,7 @@ npx.cmd @deepseek-ai/dsh plugin --profile web add dsh-pdf-translator@1.1.0
 
 ## 公式修复与限制
 
-推荐引擎包含本地 1.0.1–1.0.3 的修复：Advance/MathType 字体保护、独立变量保护、正文误识别纠正、算法和定理分行、水平线及单像素遮罩分数线规范化、CMR 算子保护、损坏译文缓存重试。只修改临时输入副本，诊断数量记录在 report.json。
+推荐引擎包含本地 1.0.1–1.0.3 的修复：Advance/MathType 字体保护、独立变量保护、正文误识别纠正、算法和定理分行、水平线及单像素遮罩分数线规范化、CMR 算子保护、损坏译文缓存重试。扩测修复限制横线长度，并排除复合绘图路径，避免把算法或表格边框当作分数线。只修改临时输入副本，诊断数量随任务结果返回。
 
 公式排版仍不是所有论文都可靠：DDPM 的部分图内标签和算法底部横线仍有位置问题，不能视为整篇核验通过。表格单元格在推荐引擎中默认保留原文；无文本层扫描件应选择 OCR。OCR 依赖视觉模型，可能识别错误；重排布局与原文不同。详见 [验证记录](VERIFICATION.md)。
 

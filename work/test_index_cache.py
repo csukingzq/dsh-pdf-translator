@@ -42,52 +42,68 @@ class CacheOpsTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.data = Path(self.temp.name) / 'data'
-        self.engine = Path(self.temp.name) / '.cache' / 'babeldoc'
-        self.engine.mkdir(parents=True)
-        (self.engine / 'cache.v1.db').write_bytes(b'x' * 100)
-        self.patch = mock.patch.object(cache_ops, 'engine_cache_dir', return_value=self.engine)
-        self.patch.start()
+        self.identity = 'c' * 16
+        self.source = Path(self.temp.name) / 'paper.pdf'
+        self.source.write_bytes(b'original')
+        self.folder = cache_ops.prepare_cache(self.data, self.identity, self.source)
+        (self.folder / 'pdf2zh.v1.db').write_bytes(b'x' * 100)
 
     def tearDown(self):
-        self.patch.stop()
         self.temp.cleanup()
 
-    def test_list_reports_documents_and_engine(self):
-        index.record(self.data, {'identity': 'c' * 16, 'source': 'D:/x/paper.pdf', 'name': 'paper.pdf',
-                                 'runDir': 'D:/out/paper', 'bytes': 500, 'at': 5000})
+    def test_list_counts_cache_not_exports_or_legacy_registry(self):
+        index.record(self.data, {'identity': 'd' * 16, 'name': 'legacy.pdf', 'bytes': 50000, 'runDir': 'D:/exports/legacy'})
         rows = cache_ops.cache_list(self.data)
-        by_id = {row['id']: row for row in rows}
-        self.assertIn('engine', by_id)
-        self.assertEqual(by_id['engine']['bytes'], 100)
-        self.assertEqual(by_id['c' * 16]['name'], 'paper.pdf')
-        self.assertEqual(by_id['c' * 16]['bytes'], 500)
-        self.assertEqual(by_id['engine']['blocked'], '')
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['id'], self.identity)
+        self.assertEqual(rows[0]['name'], 'paper.pdf')
+        self.assertEqual(rows[0]['bytes'], sum(p.stat().st_size for p in self.folder.iterdir()))
+        self.assertEqual(rows[0]['blocked'], '')
 
-    def test_clear_engine_cache(self):
-        index.record(self.data, {'identity': 'd' * 16, 'runDir': 'D:/out/d', 'bytes': 1})
-        outcome = cache_ops.clear_cache(self.data, 'engine')
-        self.assertTrue(outcome['cleared'])
-        self.assertFalse(self.engine.exists())
-        self.assertEqual(len(index.load(self.data)), 1)
-        self.assertFalse(cache_ops.clear_cache(self.data, 'engine')['cleared'])
+    def test_clear_all_models_of_one_document_only(self):
+        (self.folder / 'babeldoc.v1.db').write_bytes(b'model-2')
+        other = cache_ops.prepare_cache(self.data, 'd' * 16, self.source)
+        exported = self.data / 'outputs/translated.pdf'
+        exported.parent.mkdir()
+        exported.write_bytes(b'export')
+        ocr = self.data / 'work/document-cache' / self.identity
+        ocr.mkdir(parents=True)
+        (ocr / 'translated.md').write_text('OCR', 'utf-8')
+        with mock.patch.object(cache_ops, 'engine_cache_dir') as shared:
+            self.assertTrue(cache_ops.clear_cache(self.data, self.identity)['cleared'])
+            shared.assert_not_called()
+        self.assertFalse(self.folder.exists())
+        self.assertTrue(other.exists())
+        self.assertEqual(exported.read_bytes(), b'export')
+        self.assertEqual(self.source.read_bytes(), b'original')
+        self.assertTrue((ocr / 'translated.md').exists())
+        self.assertFalse(cache_ops.clear_cache(self.data, self.identity)['cleared'])
 
-    def test_clear_document_only_forgets_metadata(self):
-        index.record(self.data, {'identity': 'e' * 16, 'runDir': 'D:/out/e', 'bytes': 1})
-        outcome = cache_ops.clear_cache(self.data, 'e' * 16)
-        self.assertTrue(outcome['cleared'])
-        self.assertFalse(outcome['shared'])
-        self.assertEqual(index.load(self.data), [])
-        self.assertTrue(self.engine.exists())
-
-    def test_refuses_unexpected_engine_location(self):
-        other = self.engine.parent / 'other'
-        other.mkdir(parents=True, exist_ok=True)
-        with mock.patch.object(cache_ops, 'engine_cache_dir', return_value=other):
+    def test_rejects_shared_root_and_traversal(self):
+        for identity in ['engine', '..', '../' + self.identity, '']:
             with self.assertRaises(ValueError):
-                cache_ops.clear_cache(self.data, 'engine')
+                cache_ops.clear_cache(self.data, identity)
+        self.assertTrue(self.folder.exists())
 
-    def test_tree_size_ignores_missing_directory(self):
-        self.assertEqual(cache_ops.tree_size(self.engine / 'missing'), 0)
+    def test_nested_links_protect_the_whole_document(self):
+        original = cache_ops.safe_tree
+        with mock.patch.object(cache_ops, 'safe_tree', side_effect=ValueError('缓存含链接')):
+            self.assertTrue(cache_ops.cache_list(self.data)[0]['blocked'])
+            with self.assertRaises(ValueError):
+                cache_ops.clear_cache(self.data, self.identity)
+            with self.assertRaises(ValueError):
+                cache_ops.prepare_cache(self.data, self.identity, self.source)
+        original(cache_ops.root_path(self.data), self.folder)
+        self.assertTrue(self.folder.exists())
+
+    def test_root_link_is_rejected(self):
+        root = cache_ops.root_path(self.data)
+        original = Path.is_symlink
+        with mock.patch.object(Path, 'is_symlink', lambda p: p == root or original(p)):
+            with self.assertRaises(ValueError):
+                cache_ops.cache_list(self.data)
+            with self.assertRaises(ValueError):
+                cache_ops.clear_cache(self.data, self.identity)
 
 
 if __name__ == '__main__':

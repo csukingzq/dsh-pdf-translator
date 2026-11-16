@@ -122,7 +122,7 @@ def inspect(request):
 def translate(request, data_dir, config_path, on_progress):
     import engine
     import engine_config
-    import index
+    import cache_ops
     import mathfonts
     import mathrepair
     import mathrules
@@ -203,6 +203,7 @@ def translate(request, data_dir, config_path, on_progress):
                 if mathrules.has_tex_math(fonts) else 0)
             result = engine.run({
                 'configPath': str(config_path),
+                'cache_dir': str(cache_ops.prepare_cache(data_dir, identity, source)),
                 'input': str(prepared['input']),
                 'run_dir': str(prepared['run_dir']),
                 'engine_dir': str(prepared['engine_dir']),
@@ -226,20 +227,9 @@ def translate(request, data_dir, config_path, on_progress):
             # Do not leave a full PDF copy behind for a failed run.
             outputs.discard(prepared)
             raise
-        index.record(data_dir, {
-            'identity': identity,
-            'source': str(source),
-            'name': source.name,
-            'runDir': str(prepared['run_dir']),
-            'output': collected['output'],
-            'dual': collected['dual'],
-            'pages': selected,
-            'bytes': collected['bytes'],
-        })
     return {
         'output': collected['output'],
         'dual': collected['dual'],
-        'report': collected['report'],
         'pages': len(indices),
         'selected_pages': [index + 1 for index in indices],
         'status': 'complete',
