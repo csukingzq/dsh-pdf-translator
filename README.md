@@ -1,6 +1,6 @@
 # DeepSeek Harness PDF 翻译插件
 
-**1.1.1：公式修复与逐文档缓存。** 保留原 OCR 识图与 LaTeX 重排功能，新增默认推荐的 Zotero PDF2zh 路线（实际运行 pdf2zh-next / BabelDOC）。支持后台任务、页码选择、取消、缓存、插件更新和独立模型配置。
+**1.1.3：MT2 行内公式与准备提示修复。** 保留原 OCR 识图与 LaTeX 重排功能，新增默认推荐的 Zotero PDF2zh 路线（实际运行 pdf2zh-next / BabelDOC）。支持后台任务、页码选择、取消、缓存、插件更新和独立模型配置。
 
 | 引擎 | 适用文档与处理方式 | 输出 | AI 核验 |
 | --- | --- | --- | --- |
@@ -13,7 +13,7 @@
 
 需要 Windows 10/11、DSH 0.2.1-rc.3 或更新的 0.2.x、Python 3.10–3.13（可使用 DSH 自带 Python）。
 
-1. 在 DSH **插件 → 添加插件** 中安装 `dsh-pdf-translator@1.1.1`；也可下载 [GitHub Release 安装包](https://github.com/csukingzq/dsh-pdf-translator/releases/latest/download/dsh-pdf-translator.tgz)。
+1. 在 DSH **插件 → 添加插件** 中安装 `dsh-pdf-translator@1.1.3`；也可下载 [GitHub Release 安装包](https://github.com/csukingzq/dsh-pdf-translator/releases/latest/download/dsh-pdf-translator.tgz)。
 2. 启用插件并打开 **PDF 翻译** 面板，选择引擎。默认推荐 Zotero PDF2zh。
 3. 点 **一键准备环境**，只安装所选引擎需要的组件。Python 依赖优先使用清华、阿里镜像，失败回退官方 PyPI。Pandoc/Tectonic 无可验证的国内镜像时使用官方发行文件。
 4. 在 **模型配置** 中填写 OpenAI 兼容接口、模型和密钥。OCR 必须使用支持图片输入的视觉模型；推荐引擎可使用 DeepSeek 等文本模型。两套配置分别保存。
@@ -24,7 +24,7 @@
 CLI 安装示例：
 
 ```powershell
-npx.cmd @deepseek-ai/dsh plugin --profile web add dsh-pdf-translator@1.1.1
+npx.cmd @deepseek-ai/dsh plugin --profile web add dsh-pdf-translator@1.1.3
 ```
 
 ## 页码、结果和缓存

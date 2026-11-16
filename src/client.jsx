@@ -149,7 +149,7 @@ export function Panel({store,call,ensureSession}){
             <div className="pdf-row"><button disabled={pending} onClick={()=>action(cancelSetup)}>取消</button></div>
           </>:<>
             <strong>{needsEnvironment?'首次使用需要准备运行环境':'还差模型配置'}</strong>
-            <small>{needsEnvironment?(isOcr?'安装识图依赖、Pandoc 和 Tectonic，首次编译会联网下载 LaTeX 资源。':'约 1 GB，首次翻译还会下载约 300 MB 模型，需要联网；视网络情况可能需要十几分钟。'):'填写接口地址、模型名称和 API 密钥后即可开始翻译。'}</small>
+            <small>{needsEnvironment?(isOcr?'安装识图依赖、Pandoc 和 Tectonic，首次编译会联网下载 LaTeX 资源。':'运行环境约 1 GB；缺少 BabelDOC 模型时会自动下载（约 300 MB）。准备环境需要联网，视网络情况可能需要十几分钟。'):'填写接口地址、模型名称和 API 密钥后即可开始翻译。'}</small>
             {setup.error&&<p role="alert" className="pdf-error">{setup.error}</p>}
             {setup.configError&&<p role="alert" className="pdf-error">{setup.configError}</p>}
             {setup.platformOk===false
@@ -173,7 +173,6 @@ export function Panel({store,call,ensureSession}){
           <strong title={current.args.pdf}>{fileName(current.args.pdf)}</strong>
           <progress aria-label="翻译进度" max={100} value={percent}/>
           <div className="pdf-row"><small>{current.status==='stopping'?'正在取消':phaseNames[progress?.phase]||'准备'}{progress?.stage?` · ${progress.stage}`:''}</small><small>{percent}%{progress?.elapsedSeconds?` · 已等待 ${progress.elapsedSeconds} 秒`:''}{progress?.total?` · ${progress.completed||0}/${progress.total} ${current?.args.engine==='ocr'?'页':'段'}`:''}</small></div>
-          {current?.args.engine!=='ocr'&&progress?.phase==='preparing'&&<small>首次运行会下载 BabelDOC 模型（约 300 MB），可能需要几分钟。</small>}
         </div>}
       </div>
     </section>
