@@ -139,7 +139,8 @@ class BridgeTest(unittest.TestCase):
         self.assertTrue(result['warnings'])
         self.assertIn('MathType', result['warnings'][0])
         identity = hashlib.sha256(self.source.read_bytes()).hexdigest()[:16]
-        self.assertEqual(Path(seen['cache_dir']), self.data / 'work/pdf2zh-cache' / identity)
+        self.assertEqual(Path(seen['cache_dir']).resolve(),
+                         (self.data / 'work/pdf2zh-cache' / identity).resolve())
         rows = cache_ops.cache_list(self.data)
         self.assertEqual(rows[0]['id'], identity)
         self.assertEqual(rows[0]['name'], 'paper.pdf')
