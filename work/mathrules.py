@@ -50,7 +50,7 @@ def solid_rule_mask(image, matrix):
     return b == c == 0 and 0 < abs(d) < abs(a) / 4 and abs(a) <= MAX_RULE_LENGTH
 
 
-def normalize_rules(path, indices):
+def normalize_rules(path, indices, allow_color_rules=False):
     from pypdf import PdfReader, PdfWriter
     from pypdf.generic import ContentStream, DecodedStreamObject, DictionaryObject
     from pypdf.generic import FloatObject, NameObject, NumberObject
@@ -67,6 +67,7 @@ def normalize_rules(path, indices):
                                     if resources.get('/XObject') is not None else {})
         ops, out, stack = stream.operations, [], []
         black, safe, changed = True, True, 0
+        cap, dash = 0, []
         path_open = False
         path_before = []
         for i, (args, op) in enumerate(ops):
@@ -82,16 +83,27 @@ def normalize_rules(path, indices):
                 changed += 1
                 continue
             if op == b'q':
-                stack.append((black, safe))
+                stack.append((black, safe, cap, dash))
             elif op == b'Q':
-                black, safe = stack.pop() if stack else (False, False)
+                black, safe, cap, dash = stack.pop() if stack else (False, False, None, [1])
+            elif op == b'J':
+                cap = int(args[0])
+            elif op == b'd':
+                dash = list(args[0])
             elif op == b'G':
                 black = float(args[0]) == 0
             elif op in (b'RG', b'K', b'CS', b'SC', b'SCN'):
                 black = False
             elif op == b'gs':
                 # Stroke and fill alpha/blending may differ. Do not guess.
-                safe = False
+                states = resources.get('/ExtGState')
+                state = states.get_object().get(args[0]) if states is not None else None
+                state = state.get_object() if state is not None else {}
+                benign = {'/Type', '/OPM', '/op', '/OP', '/BG2', '/UCR2', '/SM', '/SA'}
+                disabled = lambda key: not getattr(state.get(key, False), 'value', state.get(key, False))
+                safe = (safe and allow_color_rules and bool(state) and not (set(state) - benign)
+                        and all(disabled(k) for k in ('/op', '/OP', '/SA'))
+                        and all(state.get(k, '/Default') == '/Default' for k in ('/BG2', '/UCR2')))
             if op == b'Do' and black and safe and len(ancestors) < 12:
                 ref = xobjects.get(args[0])
                 child = ref.get_object() if ref is not None else None
@@ -112,11 +124,37 @@ def normalize_rules(path, indices):
                         xobjects[name] = writer._add_object(clone)
                         args = [name]
                         changed += n
+            # MT2 books use short ICC-coloured strokes without TeX's explicit
+            # dash/cap operators. Match the whole isolated path and transfer
+            # the stroke colour space/components to fill, inside its q/Q.
+            if (allow_color_rules and page and op == b'S' and safe and cap == 0 and not dash
+                    and i >= 7 and i + 1 < len(ops) and ops[i + 1][1] == b'Q'
+                    and not path_before[i - 2]
+                    and [o for _, o in ops[i - 7:i]] == [b'q', b'cm', b'CS', b'SCN', b'w', b'm', b'l']):
+                _, matrix, space, colour, width, start, end = [a for a, _ in ops[i - 7:i]]
+                h = float(width[0])
+                length = abs(float(end[0]) - float(start[0]))
+                definition = resources.get('/ColorSpace', {}).get_object() if resources.get('/ColorSpace') is not None else {}
+                definition = definition.get(space[0])
+                definition = definition.get_object() if definition is not None else space[0]
+                components = {'/DeviceGray': 1, '/DeviceRGB': 3, '/DeviceCMYK': 4}.get(str(definition))
+                if isinstance(definition, list) and len(definition) == 2 and definition[0] == '/ICCBased':
+                    components = definition[1].get_object().get('/N')
+                if (components in (1, 3, 4) and len(colour) == components
+                        and all(isinstance(v, (int, float)) and 0 <= v <= 1 for v in colour)
+                        and matrix[1] == matrix[2] == 0
+                        and float(start[1]) == float(end[1]) and 4 * h < length <= MAX_RULE_LENGTH and h > 0):
+                    rect = [min(float(start[0]), float(end[0])), float(start[1]) - h / 2, length, h]
+                    out = out[:-2]
+                    out.extend([(space, b'cs'), (colour, b'scn'),
+                                ([FloatObject(v) for v in rect], b're'), ([], b'f')])
+                    changed += 1
+                    continue
             if (op == b'S' and black and safe and i >= 5 and not path_before[i - 2]
                     and [o for _, o in ops[i - 5:i]] == [b'd', b'J', b'w', b'm', b'l']):
-                dash, cap, width, start, end = [a for a, _ in ops[i - 5:i]]
+                rule_dash, rule_cap, width, start, end = [a for a, _ in ops[i - 5:i]]
                 h = float(width[0])
-                if (not dash[0] and cap[0] == 0 and h > 0
+                if (not rule_dash[0] and rule_cap[0] == 0 and h > 0
                         and float(start[1]) == float(end[1])
                         and 4 * h < abs(float(end[0]) - float(start[0])) <= MAX_RULE_LENGTH):
                     x = min(float(start[0]), float(end[0]))

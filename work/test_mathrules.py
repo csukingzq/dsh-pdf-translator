@@ -17,6 +17,40 @@ def stream(data):
 
 
 class MathRulesTest(unittest.TestCase):
+    def test_coloured_short_rules_preserve_render_and_skip_unsafe_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'coloured.pdf'
+            writer = PdfWriter()
+            resources = DictionaryObject({NameObject('/ColorSpace'): DictionaryObject({
+                NameObject('/CS0'): NameObject('/DeviceRGB')}),
+                NameObject('/ExtGState'): DictionaryObject({
+                    NameObject('/Print'): DictionaryObject({NameObject('/OP'): BooleanObject(False),
+                                                          NameObject('/op'): BooleanObject(False)}),
+                    NameObject('/Alpha'): DictionaryObject({NameObject('/CA'): FloatObject(.5)})})})
+            rule = b'q 1 0 0 1 10 30 cm /CS0 CS .1 .3 .6 SCN .5 w 0 0 m 30 0 l S Q '
+            data = (b'/Print gs ' + rule + b'q [2 1] 0 d ' + rule + b'Q '
+                    + b'q 1 J ' + rule + b'Q ' + b'q /Alpha gs ' + rule + b'Q '
+                    + rule.replace(b'30 0 l', b'90 0 l')
+                    + b'0 0 m 1 1 l ' + rule + b'0 0 5 5 re f')
+            content = writer._add_object(stream(data))
+            for _ in range(2):
+                page = writer.add_blank_page(120, 80)
+                page[NameObject('/Resources')] = resources
+                page[NameObject('/Contents')] = content
+            writer.write(path)
+            writer.close()
+            before = path.read_bytes()
+            self.assertEqual(normalize_rules(path, [0]), 0)
+            self.assertEqual(path.read_bytes(), before)
+            with pymupdf.open(path) as doc:
+                pixels = [p.get_pixmap(matrix=pymupdf.Matrix(2, 2)).samples for p in doc]
+            self.assertEqual(normalize_rules(path, [0], allow_color_rules=True), 1)
+            with pymupdf.open(path) as doc:
+                self.assertEqual(pixels, [p.get_pixmap(matrix=pymupdf.Matrix(2, 2)).samples for p in doc])
+            with PdfReader(path) as doc:
+                self.assertEqual(doc.pages[1].get_contents().get_data(), data)
+            self.assertEqual(normalize_rules(path, [0], allow_color_rules=True), 0)
+
     def test_inline_rule_mask_requires_opaque_stencil_and_thin_shape(self):
         settings = {'/IM': BooleanObject(True), '/W': 1, '/H': 1, '/BPC': 1}
         mask = {'settings': settings, 'data': b'\x00'}

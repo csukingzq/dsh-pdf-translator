@@ -22,6 +22,20 @@ PAGE_FONTS = [
 
 
 class MathFontsTest(unittest.TestCase):
+    def test_mt2_math_fonts_keep_glyphs_without_protecting_times_prose(self):
+        families = ['MT2MIT', 'MT2SYT', 'MT2SYS', 'MT2EXA', 'MT2SYF']
+        names = ['ABCDEF+' + name for name in families]
+        names.append('BASE64:' + base64.b64encode(b'GHIJKL+MT2MIT').decode())
+        prose = ['Times-Roman', 'Times-Italic', 'Times-Bold', 'MT2Text', 'MT2']
+        self.assertEqual(mathfonts.detect(names + prose), families)
+        pattern = mathfonts.formula_font_pattern(names + prose)
+        for family in families:
+            self.assertIsNone(re.match(mathfonts.DEFAULT_BROAD_PATTERN, family))
+            self.assertTrue(re.match(pattern, family), family)
+        for family in prose:
+            self.assertFalse(re.match(pattern, family), family)
+        self.assertTrue(re.match(pattern, 'MSBM10'))
+
     def test_tex_roman_operators_do_not_protect_a_prose_font(self):
         def page(spans):
             return SimpleNamespace(get_text=lambda _: {'blocks': [{'lines': [{'spans': [

@@ -126,6 +126,7 @@ def translate(request, data_dir, config_path, on_progress):
     import mathfonts
     import mathrepair
     import mathrules
+    import mt2math
     import outputs
     import pages
     import pymupdf
@@ -198,9 +199,14 @@ def translate(request, data_dir, config_path, on_progress):
             diagnostics['protectedVariableRuns'] = (
                 mathrepair.protect_variables(prepared['input'], indices)
                 if math_compatibility else 0)
+            mt2 = mt2math.has_mt2(fonts)
+            diagnostics['protectedOperatorRuns'] = (
+                mt2math.protect_operators(prepared['input'], indices) if mt2 else 0)
+            diagnostics['isolatedFontResources'] = (
+                mt2math.isolate_shared_fonts(prepared['input'], indices) if mt2 else 0)
             diagnostics['normalizedRuleLines'] = (
-                mathrules.normalize_rules(prepared['input'], indices)
-                if mathrules.has_tex_math(fonts) else 0)
+                mathrules.normalize_rules(prepared['input'], indices, allow_color_rules=mt2)
+                if mathrules.has_tex_math(fonts) or mt2 else 0)
             result = engine.run({
                 'configPath': str(config_path),
                 'cache_dir': str(cache_ops.prepare_cache(data_dir, identity, source)),
@@ -212,6 +218,7 @@ def translate(request, data_dir, config_path, on_progress):
                 'formular_font_pattern': pattern,
                 'math_compatibility': math_compatibility,
                 'structured_layout': True,
+                'preserve_formula_offsets': mt2,
             }, on_progress)
             diagnostics.update(result.get('diagnostics') or {})
             collected = outputs.collect(prepared, result, {

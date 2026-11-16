@@ -218,6 +218,38 @@ class EngineHostTest(unittest.TestCase):
 
 
 class DocumentCacheTest(unittest.TestCase):
+    def test_formula_offset_override_is_opt_in(self):
+        import asyncio
+        from types import ModuleType, SimpleNamespace
+        from unittest import mock
+        import engine_host
+
+        adapter = ModuleType('pdf2zh_next.high_level')
+        backend = ModuleType('babeldoc.format.pdf.high_level')
+        observed = []
+
+        async def translate(config):
+            observed.append(config.skip_formula_offset_calculation)
+            yield {'type': 'error', 'error': 'test stopped before translation'}
+
+        backend.async_translate = translate
+
+        async def exercise():
+            for enabled in [False, True]:
+                translator = object()
+                config = SimpleNamespace(skip_formula_offset_calculation=False,
+                                         translator=translator, term_extraction_translator=translator,
+                                         doc_layout_model=object())
+                adapter.create_babeldoc_config = lambda *_: config
+                async for _ in engine_host.translate_math(
+                        object(), {'input': 'test.pdf'}, False, enabled):
+                    pass
+
+        with mock.patch.dict(sys.modules, {'pdf2zh_next.high_level': adapter,
+                                          'babeldoc.format.pdf.high_level': backend}):
+            asyncio.run(exercise())
+        self.assertEqual(observed, [False, True])
+
     def test_host_binds_both_databases_and_scratch_to_document(self):
         from types import ModuleType
         from unittest import mock

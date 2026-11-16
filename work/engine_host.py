@@ -105,7 +105,8 @@ async def translate(request):
     if request.get('cache_dir'):
         configure_cache(request['cache_dir'])
     settings, host = settings_from(request)
-    stream = (translate_math(settings, host, request.get('math_compatibility', False))
+    stream = (translate_math(settings, host, request.get('math_compatibility', False),
+                             request.get('preserve_formula_offsets', False))
               if request.get('math_compatibility') or request.get('structured_layout')
               else do_translate_async_stream(settings, host['input']))
     async for event in stream:
@@ -141,7 +142,7 @@ def configure_cache(folder):
         cache.db.create_tables([cache._TranslationCache], safe=True)
 
 
-async def translate_math(settings, host, math_compatibility=True):
+async def translate_math(settings, host, math_compatibility=True, preserve_formula_offsets=False):
     """Use the engine's config adapter with a guarded layout model.
 
     Already isolated by engine.py, so this path does not need pdf2zh-next's
@@ -154,6 +155,10 @@ async def translate_math(settings, host, math_compatibility=True):
     from translation_guard import TranslationGuard
 
     config = create_babeldoc_config(settings, Path(host['input']))
+    # MT2 glyphs have unusual metrics. Re-estimating their offsets can detach
+    # subscripts and wrap fragments; keep their original relative geometry.
+    if preserve_formula_offsets:
+        config.skip_formula_offset_calculation = True
     same_translator = config.term_extraction_translator is config.translator
     config.translator = TranslationGuard(config.translator)
     config.term_extraction_translator = (config.translator if same_translator else

@@ -1,4 +1,4 @@
-"""Detect PDFs whose math is typeset with MathType / Advance fonts.
+"""Detect PDFs whose math is typeset with legacy mathematical fonts.
 
 BabelDOC decides whether a text run is a formula by font name. Its default
 broad pattern misses the MathType ``AdvMacMth*`` / ``AdvP4C4E*`` / ``AdvEls-*``
@@ -38,8 +38,13 @@ DEFAULT_BROAD_PATTERN = (
 
 # Fonts that MathType and Advanced Grafx emit for math symbols / extensions.
 # Body text uses the separate ``AdvOT*`` (Times) families and must not match.
+# MT2 math italic, symbol and extension fonts are also missed by the engine:
+# its MT[A-Z] default cannot match the digit in MT2MIT / MT2SYT / MT2EXA.
+# Their Unicode maps can encode visible equals/plus/radical glyphs as D/C/p.
+# Do not include unrelated MT2 names or the Times fonts used for ordinary prose.
 SUSPECT = re.compile(
-    r'^(AdvMacMth.*|AdvP4C4E.*|AdvEls-.*|AdvPi.*|AdvPSSym.*|MathType.*|MTExtra.*)$'
+    r'^(AdvMacMth.*|AdvP4C4E.*|AdvEls-.*|AdvPi.*|AdvPSSym.*|MathType.*|MTExtra.*'
+    r'|MT2(?:MI|SY|EX)[A-Z0-9]*)$'
 )
 
 # Characters a broken math-font ToUnicode mapping produces in extracted text.
@@ -81,7 +86,7 @@ def formula_font_pattern(font_names):
         return None
     additions = '|'.join(re.escape(name) for name in families)
     # Isolated italic variables receive a separate resource in mathrepair.
-    additions += '|DSHMathItalic'
+    additions += '|DSHMathItalic|DSHMathOperator'
     return DEFAULT_BROAD_PATTERN[:-1] + '|' + additions + ')'
 
 

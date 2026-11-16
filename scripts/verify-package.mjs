@@ -27,6 +27,7 @@ const required = [
   'package/work/errors.py',
   'package/work/index.py',
   'package/work/mathfonts.py',
+  'package/work/mt2math.py',
   'package/work/mathrepair.py',
   'package/work/mathlayout.py',
   'package/work/structured_layout.py',
