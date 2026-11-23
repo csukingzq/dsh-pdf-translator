@@ -1,5 +1,6 @@
 node_modules/
 .venv/
+.venv-mineru/
 runtime/
 config.json
 outputs/

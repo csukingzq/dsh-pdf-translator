@@ -1,0 +1,3 @@
+# Separate environment: never install into the PDF2zh environment.
+mineru==4.2.3
+-r requirements-mineru-render.txt

@@ -119,7 +119,7 @@ def inspect(request):
     }
 
 
-def translate(request, data_dir, config_path, on_progress):
+def translate(request, data_dir, config_path, on_progress, *, cache_source=None, prepared_output=None, locked=False):
     import engine
     import engine_config
     import cache_ops
@@ -190,10 +190,11 @@ def translate(request, data_dir, config_path, on_progress):
     cache_root = (data_dir / 'work').resolve()
     if output_dir == cache_root or output_dir.is_relative_to(cache_root):
         raise ValueError('输出目录不能位于插件工作目录内。')
-    identity = hashlib.sha256(source.read_bytes()).hexdigest()[:16]
+    cache_source = Path(cache_source) if cache_source else source
+    identity = hashlib.sha256(cache_source.read_bytes()).hexdigest()[:16]
 
-    with exclusive(data_dir):
-        prepared = outputs.prepare(output_dir, source)
+    with contextlib.nullcontext() if locked else exclusive(data_dir):
+        prepared = prepared_output or outputs.prepare(output_dir, source)
         try:
             math_compatibility = bool(diagnostics['mathFonts'])
             diagnostics['protectedVariableRuns'] = (
@@ -209,7 +210,7 @@ def translate(request, data_dir, config_path, on_progress):
                 if mathrules.has_tex_math(fonts) or mt2 else 0)
             result = engine.run({
                 'configPath': str(config_path),
-                'cache_dir': str(cache_ops.prepare_cache(data_dir, identity, source)),
+                'cache_dir': str(cache_ops.prepare_cache(data_dir, identity, cache_source)),
                 'input': str(prepared['input']),
                 'run_dir': str(prepared['run_dir']),
                 'engine_dir': str(prepared['engine_dir']),
@@ -232,7 +233,10 @@ def translate(request, data_dir, config_path, on_progress):
             })
         except BaseException:
             # Do not leave a full PDF copy behind for a failed run.
-            outputs.discard(prepared)
+            if prepared_output:
+                outputs._cleanup(prepared)
+            else:
+                outputs.discard(prepared)
             raise
     return {
         'output': collected['output'],

@@ -2,10 +2,9 @@
 import { z } from 'zod';
 import { createTypertRemoteInfo } from '@deepseek-ai/dsh-typert-protocol/remote-info';
 
-export const engineSchema = z.enum(['pdf2zh','ocr']);
+export const engineSchema = z.enum(['pdf2zh','mineru']);
 export const translateSchema = z.strictObject({
-  engine: engineSchema.optional(), aiReview:z.boolean().optional(),
-  imageQuality:z.enum(['safe','auto','compact']).optional(), thinking:z.enum(['auto','off','on']).optional(), renderOnly:z.boolean().optional(),
+  engine: engineSchema.optional(),
   pdf: z.string().min(1), pages: z.string().optional(), workers: z.number().int().min(1).max(8).optional(),
   outputDir: z.string().optional(), background: z.boolean().optional(),
 });
@@ -19,11 +18,11 @@ export const requestSchema = z.discriminatedUnion('action', [
   z.strictObject({ action:z.literal('inspect'), pdf:z.string(), pages:z.string().optional() }),
   z.strictObject({ action:z.literal('start'), sessionId:z.string().min(1), args:translateSchema }),
   z.strictObject({ action:z.literal('cancel'), sessionId:z.string().min(1), jobId:z.string() }),
-  z.strictObject({ action:z.literal('settings'), engine:engineSchema.optional(), aiReview:z.boolean().optional(), outputDir:z.string().min(1).optional() }),
+  z.strictObject({ action:z.literal('settings'), engine:engineSchema.optional(), outputDir:z.string().min(1).optional() }),
   z.strictObject({ action:z.literal('caches') }),
   z.strictObject({ action:z.literal('prepareClear'), identity:z.string().min(1) }),
   z.strictObject({ action:z.literal('clear'), identity:z.string().min(1), token:z.string() }),
-  z.strictObject({ action:z.literal('open'), sessionId:z.string().min(1), jobId:z.string(), kind:z.enum(['output','dual','report','markdown','project','document']) }),
+  z.strictObject({ action:z.literal('open'), sessionId:z.string().min(1), jobId:z.string(), kind:z.enum(['output','dual','mineru','report','markdown','project','document']) }),
 ]);
 const codec = {mode:'strict', typeSymbol:'dsh-pdf-translator#request', create:()=>requestSchema};
 export const remoteInfo = createTypertRemoteInfo({package:'dsh-pdf-translator', methods:{

@@ -44,10 +44,9 @@ export function Panel({store,call,ensureSession}){
   const current=state.tasks.find(t=>activeStates.has(t.status));
   const selection=dialog?.kind==='translate'?pageSelection(pages,dialog.info.pages):null;
   const engine=state.engine||'pdf2zh';
-  const isOcr=engine==='ocr';
-  const [ocrOptions,setOcrOptions]=useState({imageQuality:'safe',thinking:'auto',renderOnly:false});
+  const isMineru=engine==='mineru';
   const setup=state.setups?.[engine]||state.setup;
-  const setupReady=!setup||setup.ready!==false||(isOcr&&ocrOptions.renderOnly&&setup.runtimeReady);
+  const setupReady=!setup||setup.ready!==false;
   const needsEnvironment=Boolean(setup&&(setup.missing?.python||setup.missing?.engine));
   function close(){setDialog(null);setConfirmation(null);setError('');}
   async function action(fn){
@@ -122,7 +121,7 @@ export function Panel({store,call,ensureSession}){
   async function start(valid){
     if(!setupReady)throw new Error('请先完成运行环境准备和模型配置。');
     if(selection.error)throw new Error(selection.error);
-    const args={pdf:dialog.info.path,pages:selection.pages,workers:4,outputDir:state.outputDir,engine,...(isOcr?{...ocrOptions,aiReview:state.aiReview===true}:{})};
+    const args={pdf:dialog.info.path,pages:selection.pages,workers:4,outputDir:state.outputDir,engine};
     const sessionId=store.get().sessionId || await ensureSession?.();
     if(!sessionId)throw new Error('无法建立会话，请稍后重试。');
     if(store.get().sessionId!==sessionId)throw new Error('当前会话已切换，未启动翻译。');
@@ -137,10 +136,9 @@ export function Panel({store,call,ensureSession}){
     <section className="pdf-panel" ref={panelPosition.ref} style={panelPosition.style} aria-label="PDF 翻译面板" hidden={!ui.visible}>
       <header {...panelPosition.handle}><strong className="pdf-drag-handle" tabIndex={0} onKeyDown={panelPosition.handle.onKeyDown} title="拖动或使用方向键移动面板" aria-label="移动 PDF 翻译面板">⠿ PDF 翻译</strong><button onClick={()=>store.set({visible:false})}>收起</button></header>
       <div className="pdf-body">
-        <label htmlFor="pdf-engine">翻译引擎<select id="pdf-engine" value={engine} disabled={pending||state.busy} onChange={e=>{const value=e.target.value;action(async()=>{await call({action:'settings',engine:value});setOcrOptions(prev=>({...prev,renderOnly:false}));await refresh();});}}>
-          <option value="pdf2zh">Zotero PDF2zh（推荐，保留版式）</option><option value="ocr">OCR 识图（LaTeX 重排）</option>
+        <label htmlFor="pdf-engine">翻译引擎<select id="pdf-engine" value={engine} disabled={pending||state.busy} onChange={e=>{const value=e.target.value;action(async()=>{await call({action:'settings',engine:value});await refresh();});}}>
+          <option value="pdf2zh">Zotero PDF2zh（推荐，保留版式）</option><option value="mineru">MinerU 识别 + PDF2zh（扫描件）</option>
         </select></label>
-        {isOcr&&<label><input type="checkbox" checked={state.aiReview===true} disabled={pending||state.busy} onChange={e=>{const aiReview=e.target.checked;action(async()=>{await call({action:'settings',aiReview});await refresh();});}}/>翻译后 AI 核验（最多修复两轮）</label>}
         {setup&&!setup.ready&&<div className="pdf-setup" role="status">
           {setup.running?<>
             <strong>正在准备运行环境…</strong>
@@ -149,7 +147,7 @@ export function Panel({store,call,ensureSession}){
             <div className="pdf-row"><button disabled={pending} onClick={()=>action(cancelSetup)}>取消</button></div>
           </>:<>
             <strong>{needsEnvironment?'首次使用需要准备运行环境':'还差模型配置'}</strong>
-            <small>{needsEnvironment?(isOcr?'安装识图依赖、Pandoc 和 Tectonic，首次编译会联网下载 LaTeX 资源。':'运行环境约 1 GB；缺少 BabelDOC 模型时会自动下载（约 300 MB）。准备环境需要联网，视网络情况可能需要十几分钟。'):'填写接口地址、模型名称和 API 密钥后即可开始翻译。'}</small>
+            <small>{needsEnvironment?(isMineru?'安装本机 MinerU 和 PDF2zh；缺少识别模型时会在首次处理时自动下载。':'运行环境约 1 GB；缺少 BabelDOC 模型时会自动下载（约 300 MB）。准备环境需要联网，视网络情况可能需要十几分钟。'):'填写接口地址、模型名称和 API 密钥后即可开始翻译。'}</small>
             {setup.error&&<p role="alert" className="pdf-error">{setup.error}</p>}
             {setup.configError&&<p role="alert" className="pdf-error">{setup.configError}</p>}
             {setup.platformOk===false
@@ -172,7 +170,7 @@ export function Panel({store,call,ensureSession}){
         {current&&<div className="pdf-task" aria-live="polite">
           <strong title={current.args.pdf}>{fileName(current.args.pdf)}</strong>
           <progress aria-label="翻译进度" max={100} value={percent}/>
-          <div className="pdf-row"><small>{current.status==='stopping'?'正在取消':phaseNames[progress?.phase]||'准备'}{progress?.stage?` · ${progress.stage}`:''}</small><small>{percent}%{progress?.elapsedSeconds?` · 已等待 ${progress.elapsedSeconds} 秒`:''}{progress?.total?` · ${progress.completed||0}/${progress.total} ${current?.args.engine==='ocr'?'页':'段'}`:''}</small></div>
+          <div className="pdf-row"><small>{current.status==='stopping'?'正在取消':phaseNames[progress?.phase]||'准备'}{progress?.stage?` · ${progress.stage}`:''}</small><small>{percent}%{progress?.elapsedSeconds?` · 已等待 ${progress.elapsedSeconds} 秒`:''}{progress?.total?` · ${progress.completed||0}/${progress.total} ${progress?.unit||'段'}`:''}</small></div>
         </div>}
       </div>
     </section>
@@ -181,12 +179,7 @@ export function Panel({store,call,ensureSession}){
         <p className="pdf-document" title={dialog.info.path}>{fileName(dialog.info.path)} <small>共 {dialog.info.pages} 页</small></p>
         <label>输出目录<small className="pdf-path">{state.outputDir}</small></label>
         <label htmlFor="pdf-pages">翻译页码<input id="pdf-pages" autoFocus value={pages} placeholder="全部，或 1,3,5-8" onChange={e=>setPages(e.target.value)}/></label>
-        {selection.error?<p role="alert" className="pdf-error">{selection.error}</p>:<small>将翻译 {selection.count} 页；留空表示全部。{isOcr?'仅处理所选原文页；LaTeX 重排后输出页数可能变化。':'单语和双语 PDF 只保留所选页面。'}</small>}
-        {isOcr&&<details><summary>OCR 高级选项</summary>
-          <label>识图质量<select value={ocrOptions.imageQuality} onChange={e=>setOcrOptions({...ocrOptions,imageQuality:e.target.value})}><option value="safe">高保真</option><option value="auto">自动</option><option value="compact">节省流量</option></select></label>
-          <label>模型思考<select value={ocrOptions.thinking} onChange={e=>setOcrOptions({...ocrOptions,thinking:e.target.value})}><option value="auto">自动</option><option value="off">关闭</option><option value="on">开启</option></select></label>
-          <label><input type="checkbox" checked={ocrOptions.renderOnly} onChange={e=>setOcrOptions({...ocrOptions,renderOnly:e.target.checked})}/>仅用已有 OCR 缓存重新排版（不调用模型）</label>
-        </details>}
+        {selection.error?<p role="alert" className="pdf-error">{selection.error}</p>:<small>将翻译 {selection.count} 页；留空表示全部。{isMineru?'识别版、单语和双语 PDF 只保留所选页面。':'单语和双语 PDF 只保留所选页面。'}</small>}
         {!setupReady&&<small>请先完成运行环境准备和模型配置。</small>}
         {state.busy&&<small>已有任务运行或正在准备，请在原生任务中查看。</small>}
         <div className="pdf-dialog-actions"><button disabled={pending} onClick={close}>取消</button><button className="pdf-primary" disabled={pending||!!selection.error||state.busy||!state.outputDir||!setupReady} onClick={()=>action(start)}>开始翻译</button></div>
@@ -197,9 +190,9 @@ export function Panel({store,call,ensureSession}){
       </>}
       {dialog.kind==='config'&&<>
         <label htmlFor="pdf-base-url">接口地址<input id="pdf-base-url" autoFocus value={configForm.baseUrl} placeholder="https://api.deepseek.com/v1" onChange={e=>setConfigForm({...configForm,baseUrl:e.target.value})}/></label>
-        <label htmlFor="pdf-model">模型名称<input id="pdf-model" value={configForm.model} placeholder={isOcr?'支持图片输入的视觉模型名':'支持文本翻译的模型名'} onChange={e=>setConfigForm({...configForm,model:e.target.value})}/></label>
+        <label htmlFor="pdf-model">模型名称<input id="pdf-model" value={configForm.model} placeholder={'支持文本翻译的模型名'} onChange={e=>setConfigForm({...configForm,model:e.target.value})}/></label>
         <label htmlFor="pdf-api-key">API 密钥<input id="pdf-api-key" type="password" autoComplete="new-password" value={configForm.apiKey} placeholder={setup?.config?.hasApiKey?'已保存，留空保持不变':'请输入密钥'} onChange={e=>setConfigForm({...configForm,apiKey:e.target.value})}/></label>
-        <small>密钥保存在本机，仅用于向所配置的模型接口发起请求。两种引擎分别保存模型配置。</small>
+        <small>密钥保存在本机，仅用于向所配置的模型接口发起请求。两种引擎共用此翻译模型配置。</small>
         <div className="pdf-dialog-actions"><button disabled={pending} onClick={close}>取消</button><button className="pdf-primary" disabled={pending||!configForm.baseUrl.trim()||!configForm.model.trim()||(!setup?.config?.hasApiKey&&!configForm.apiKey.trim())} onClick={()=>action(saveConfig)}>保存</button></div>
       </>}
       {dialog.kind==='cache'&&<>
@@ -208,7 +201,7 @@ export function Panel({store,call,ensureSession}){
         {(caches?.cleaningDisabled||state.busy)&&<small>翻译或取消任务尚未结束，暂不能清理。</small>}
         {caches?.entries.length===0&&<small>没有缓存。</small>}
         <div className="pdf-cache-list">{caches?.entries.map(row=><div className="pdf-cache" key={row.id}>
-          <strong title={row.source}>{row.name}</strong><small>{formatSize(row.bytes)} · {row.engine==='ocr'?'OCR':'PDF2zh'} · {row.busy?'使用中':row.blocked?'受保护':'未使用'}</small>
+          <strong title={row.source}>{row.name}</strong><small>{formatSize(row.bytes)} · {row.engine==='ocr'?'旧 OCR':row.engine==='mineru'?'MinerU + PDF2zh':'PDF2zh'} · {row.busy?'使用中':row.blocked?'受保护':'未使用'}</small>
           {row.blocked&&<small>{row.blocked}</small>}
           <button disabled={pending||state.busy||caches.cleaningDisabled||row.busy||!!row.blocked} onClick={()=>action(async()=>setConfirmation(await call({action:'prepareClear',identity:row.id})))}>清理该文档缓存</button>
         </div>)}</div>

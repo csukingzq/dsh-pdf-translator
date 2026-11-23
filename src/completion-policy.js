@@ -1,6 +1,7 @@
 import {completionPolicy as ocrPolicy} from './review.js';
 export function completionPolicy(enabled=false,engine='pdf2zh'){
   if(engine==='ocr')return ocrPolicy(enabled);
+  if(engine==='mineru')return '成功后只读取一次 job_output，简短回复翻译完成，并附 output（单语译文）、dual（双语对照）和 mineru（MinerU 识别版）三个 PDF 链接。不要自动核验或重新翻译；有警告简短提示，失败或取消时如实报告。';
   return '成功后只读取一次 job_output，直接简短回复“翻译完成”，并附结果中的 output（mono 单语 PDF）与 dual（双语对照 PDF）两个链接；有警告仅简短提示。不要列目录、读取译文、渲染预览或重新翻译；不可声称内容核验通过。失败或取消时如实报告。用户后续明确要求或本轮另有工作时可正常执行其他任务。';
 }
 
@@ -32,12 +33,12 @@ export class CompletionGate {
     }
     if(exec.name==='pdf_review'&&state.tasks.get(a.jobId)?.args?.engine==='ocr'&&state.tasks.get(a.jobId)?.aiReview)return;
     // Markdown PDF/zip links require no presentation/file tool.
-    return '本轮仅由 PDF 完成通知触发。每个任务只读取一次 job_output；核验开启时用 pdf_review，否则直接简短回复并附结果中的 PDF 与 LaTeX 压缩包链接。用户新要求和包含其他工作的轮次不受此限制。';
+    return '本轮仅由 PDF 完成通知触发。每个任务只读取一次 job_output，并按该任务的 completionPolicy 简短回复、附上成果链接。用户新要求和包含其他工作的轮次不受此限制。';
   }
   prompt(owner){
     const state=this.turns.get(owner);
     if(!state?.tasks.size)return '';
-    return [...state.tasks.values()].map(t=>`PDF 任务 ${t.id} 的核验设置：${completionPolicy(t.aiReview,t.args?.engine||'pdf2zh')}${t.status==='failed'||t.status==='killed'?' 此任务未成功，不得报告翻译完成。':''}`).join('\n');
+    return [...state.tasks.values()].map(t=>`PDF 任务 ${t.id} 的完成处理规则：${completionPolicy(t.aiReview,t.args?.engine||'pdf2zh')}${t.status==='failed'||t.status==='killed'?' 此任务未成功，不得报告翻译完成。':''}`).join('\n');
   }
 }
 

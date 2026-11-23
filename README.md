@@ -1,90 +1,68 @@
 # DeepSeek Harness PDF 翻译插件
 
-**1.1.3：MT2 行内公式与准备提示修复。** 保留原 OCR 识图与 LaTeX 重排功能，新增默认推荐的 Zotero PDF2zh 路线（实际运行 pdf2zh-next / BabelDOC）。支持后台任务、页码选择、取消、缓存、插件更新和独立模型配置。
+支持文本 PDF 和扫描件两条路线。保留后台任务、页码选择、取消、逐文档缓存和插件更新功能。
 
-| 引擎 | 适用文档与处理方式 | 输出 | AI 核验 |
-| --- | --- | --- | --- |
-| **Zotero PDF2zh（推荐）** | 有文本层的论文，保留公式、图表和原版式；使用文本模型 | 单语 mono PDF、双语 dual PDF、报告 | 不提供 |
-| **OCR 识图** | 扫描件或需要重新排版的文档；视觉模型识别后翻译正文、LaTeX 重排 | PDF、LaTeX 源码包、Markdown、结构文档、报告 | 可选，逐页核验，最多修复两轮 |
+| 引擎 | 处理方式 | 输出 |
+| --- | --- | --- |
+| **Zotero PDF2zh（推荐）** | 文本 PDF 直接用 pdf2zh-next / BabelDOC 翻译，保留公式、图表和版式 | 单语 mono、双语 dual PDF |
+| **MinerU 识别 + PDF2zh** | 本机 MinerU 识别扫描件，生成带文字的 PDF，然后自动交给同一翻译引擎 | MinerU 识别版、mono、dual PDF |
 
-本项目是独立的 DSH 插件。感谢 [Zotero PDF2zh](https://github.com/guaguastandup/zotero-pdf2zh)、[PDFMathTranslate-next](https://github.com/PDFMathTranslate/PDFMathTranslate-next) 和 [BabelDOC](https://github.com/funstory-ai/BabelDOC)。此版本不是上述作者的官方发行版。
+1.2.0 起用 MinerU 替换视觉大模型 OCR 和 LaTeX 重排；不再生成源码包、Markdown、report.json，也不提供 AI 核验。识别版保留原文语言。
 
-## 安装和首次使用
+本项目是独立 DSH 插件，使用 [MinerU](https://github.com/opendatalab/MinerU)、[Zotero PDF2zh](https://github.com/guaguastandup/zotero-pdf2zh) 的集成方式、[PDFMathTranslate-next](https://github.com/PDFMathTranslate/PDFMathTranslate-next) 和 [BabelDOC](https://github.com/funstory-ai/BabelDOC)。不是上述项目的官方发行版。
 
-需要 Windows 10/11、DSH 0.2.1-rc.3 或更新的 0.2.x、Python 3.10–3.13（可使用 DSH 自带 Python）。
+## 安装与使用
 
-1. 在 DSH **插件 → 添加插件** 中安装 `dsh-pdf-translator@1.1.3`；也可下载 [GitHub Release 安装包](https://github.com/csukingzq/dsh-pdf-translator/releases/latest/download/dsh-pdf-translator.tgz)。
-2. 启用插件并打开 **PDF 翻译** 面板，选择引擎。默认推荐 Zotero PDF2zh。
-3. 点 **一键准备环境**，只安装所选引擎需要的组件。Python 依赖优先使用清华、阿里镜像，失败回退官方 PyPI。Pandoc/Tectonic 无可验证的国内镜像时使用官方发行文件。
-4. 在 **模型配置** 中填写 OpenAI 兼容接口、模型和密钥。OCR 必须使用支持图片输入的视觉模型；推荐引擎可使用 DeepSeek 等文本模型。两套配置分别保存。
-5. 选择 PDF、输出目录和页码，开始后台翻译。OCR 模式可勾选 **翻译后 AI 核验**；高级选项保留识图质量、模型思考模式和仅缓存重排。
+需要 Windows 10/11、DSH 0.2.1-rc.3 或更新的 0.2.x。推荐 Python 3.12；PDF2zh 支持 3.10–3.13，MinerU 需要 3.11–3.14。
 
-推荐引擎首次安装约需 1 GB，首次翻译还需下载约 300 MB 的模型；OCR 首次 LaTeX 编译会下载字体及排版资源。准备环境可取消或重试。面板的 **检查更新** 保留原有 DSH 插件市场更新功能。
+1. 在 DSH 插件管理中安装发布的 tgz 安装包，启用插件并打开 PDF 翻译面板。
+2. 选择引擎，点击 **一键准备环境**。MinerU 路线会同时检查和准备 PDF2zh。两个 Python 环境隔离，避免依赖冲突。
+3. 在 **模型配置** 填写 OpenAI 兼容的文本翻译接口、模型名和密钥。两条路线共用此配置，无需视觉模型。
+4. 选择 PDF、输出目录和页码，开始翻译。
 
-CLI 安装示例：
+Python 依赖优先使用清华、阿里镜像，失败回退官方 PyPI。MinerU 识别模型从 ModelScope 下载；缺少模型时首次识别会下载，之后复用。安装、下载和 CPU 识别可能耗时较长，可取消后重试。面板保留检查更新功能。
 
-```powershell
-npx.cmd @deepseek-ai/dsh plugin --profile web add dsh-pdf-translator@1.1.3
-```
+MinerU 固定使用本地 Basic 档位进行 OCR、公式和表格识别，不连接远程 MinerU/VLM 服务；识别不消耗外部模型 API token。PDF2zh 翻译仍将文字发送到配置的接口并产生相应费用。
 
-## 页码、结果和缓存
+## 页码、成果与缓存
 
-- 页码支持留空、`all`、`2-4`、`1,3,5-8`，使用 PDF 的物理页序号。
-- 推荐引擎选 `2-4` 时，mono 和左右对照 dual **各只保留所选的 3 页**。保留页面内原印刷页码。
-- OCR 仅处理所选原文页；LaTeX 重排后的输出页数可能变化，不承诺原页数。
-- 每次任务在输出目录中新建一个子文件夹。推荐引擎仅导出 mono、dual 两份 PDF，不生成 report.json；OCR 保留旧版可编辑源码和诊断成果。
-- 两种引擎均按文档列出缓存，清理须用户确认，按文档清理所有模型版本，原 PDF 和导出成果保留。PDF2zh 使用 `work/pdf2zh-cache`，包含翻译数据库和中断后可能残留的临时文件；OCR 保留 `work/document-cache` 和离线重排。共享模型、字体不在清理范围内。1.1.0 的共享缓存不会自动删除或迁移，新版首次翻译会重新建立文档缓存。
-- OCR AI 核验由当前 DSH 会话执行，通过 `pdf_review` 检查覆盖率、预览并修复，最多两轮。未完成或存在遗留问题会如实报告。推荐引擎在界面和后端均禁止该核验流程。
+- 页码使用 PDF 的物理页序号，支持留空、all、2-4、1,3,5-8。选择 2–4 时，仅处理这三页，每份输出 PDF 也保留这三页。
+- 每次运行新建一个成果子目录。MinerU 模式保存 `*-mineru.pdf`、`*-mono.pdf`、`*-dual.pdf`；直接 PDF2zh 模式只有后两份。
+- MinerU 使用原版块位置生成可选中文字的 PDF，不是给扫描图片叠加隐藏 OCR 层，也不承诺像素级还原。识别错误会影响翻译，建议先试少量页面。
+- 识别成功、翻译失败时保留 MinerU PDF，错误消息会给出位置；重试可复用识别缓存。
+- 缓存按原始文档统一列出。MinerU 的识别缓存按文件内容、所选页码、识别版本和参数区分；PDF2zh 翻译数据库继续复用。更换页面、版本或翻译配置可能新增计算和模型请求。
+- 清理仍需在面板逐文档确认；会清理对应文档的识别和翻译缓存，保留原 PDF、导出成果和共享模型。旧 OCR 缓存单独标记，可照常清理。
 
-## 升级与配置
+## 配置与升级
 
-从 0.8.0 升级保留原来的识图、数学公式重建、文档结构、目录与章节重排、图表保留、源码包、缓存、核验恢复和更新面板。首次升级默认选择推荐引擎，可切回 OCR。
+数据默认保存在 `%USERPROFILE%\.dsh\dsh-pdf-translator`。旧版引擎选项 ocr 自动迁移为 mineru；旧成果、配置和缓存不自动删除。旧 OCR 模块仅保留用于历史缓存维护和未完成事务恢复，不再出现在翻译工具和面板中。
 
-数据默认保存在 `%USERPROFILE%\.dsh\dsh-pdf-translator`；旧配置位于安装目录时继续兼容。旧版顶层 `base_url`、`model`、`api_key` 作为兼容配置，不会被保存新引擎配置覆盖。新配置分别写入 `engines.pdf2zh` 与 `engines.ocr`；旧的额外配置字段保留。
+模型配置统一读写 `engines.pdf2zh`，兼容旧顶层配置；原 `engines.ocr` 密钥和未知设置保留。密钥不随成果导出。
 
-密钥只保存在本地配置中，用于向用户指定的模型服务发送请求，不随译文导出。翻译会发送文字或页面图片并可能产生 API 费用；AI 核验也会使用当前会话模型。缓存命中可减少重复请求。
+目录覆盖：DSH_PDF_DATA_DIR、DSH_PDF_CONFIG、DSH_PDF_PYTHON、DSH_PDF_RUNTIME_DIR。翻译模型覆盖：DSH_PDF_API_KEY、DSH_PDF_BASE_URL、DSH_PDF_MODEL。MinerU 环境在数据目录的 .venv-mineru 中，与 .venv 中的 PDF2zh 隔离。
 
-可用 `DSH_PDF_DATA_DIR`、`DSH_PDF_CONFIG`、`DSH_PDF_PYTHON`、`DSH_PDF_RUNTIME_DIR` 自定义目录和运行时。`DSH_PDF_API_KEY`、`DSH_PDF_BASE_URL`、`DSH_PDF_MODEL` 是两种引擎共用的环境覆盖；需要不同模型时优先在面板分别配置，避免设置这些全局覆盖。
-
-手动安装脚本：`scripts/setup.ps1` 安装推荐引擎，`scripts/setup-ocr.ps1` 安装 OCR 运行时。均支持 `-DataDir`、`-Python`、`-OfficialOnly`。旧版可选本地结构分析器由 `scripts/setup-structure.ps1` 单独安装。
+手动安装可使用 scripts/setup.ps1 或 scripts/setup-mineru.ps1，均支持 -DataDir、-Python、-OfficialOnly；推荐直接使用面板。
 
 ## 聊天工具
 
 | 工具 | 用途 |
 | --- | --- |
-| `pdf_translate` | `engine=pdf2zh/ocr`；省略使用面板选择；支持页码、并发、输出目录、后台任务 |
-| `pdf_review` | 仅开启 AI 核验的 OCR 任务：inspect、diagnostics、preview、apply、finish |
-| `pdf_inspect` | 本地检查文件和页码，不调用模型 |
-| `pdf_translator_doctor` | 按 `engine` 检查依赖和配置，不返回密钥 |
-| `pdf_cache_list` | 查看两种缓存，不能直接清理 |
-| `pdf_panel` | 打开面板或定位缓存/输出目录操作 |
+| pdf_translate | engine=pdf2zh/mineru，省略时使用面板选择；支持页码、并发、输出目录和后台任务 |
+| pdf_inspect | 本地检查文件与页码，不调用模型 |
+| pdf_translator_doctor | 检查环境和配置，不返回密钥 |
+| pdf_cache_list | 查看文档缓存；不能直接清理 |
+| pdf_panel | 打开面板或定位缓存、输出目录操作 |
 
-仅 OCR 接受 `aiReview`、`imageQuality`、`thinking`、`renderOnly`；推荐引擎拒绝启用这些选项，防止误用。`renderOnly` 需要已有相应页面的 OCR 缓存。
+旧 aiReview、imageQuality、thinking、renderOnly 参数不再接受。成功任务按 completionPolicy 返回对应的 PDF 链接。
 
-## 公式修复与限制
+## 公式修复与开发验证
 
-推荐引擎包含本地 1.0.1–1.0.3 的修复：Advance/MathType 字体保护、独立变量保护、正文误识别纠正、算法和定理分行、水平线及单像素遮罩分数线规范化、CMR 算子保护、损坏译文缓存重试。扩测修复限制横线长度，并排除复合绘图路径，避免把算法或表格边框当作分数线。只修改临时输入副本，诊断数量随任务结果返回。
+PDF2zh 保留 Advance/MathType/MT2 字体保护、独立变量和算子保护、共享字体隔离、分数线规范化、算法/定理分行及损坏译文缓存重试等修复。MinerU PDF 渲染时保留嵌入字体形式的数学字形，避免纯矢量行内公式在翻译中丢失。仅在独立进程内适配，不修改安装的上游代码或源 PDF。公式、图内文字、复杂表格仍可能识别或排版有误，不能视为整篇核验通过。
 
-公式排版仍不是所有论文都可靠：DDPM 的部分图内标签和算法底部横线仍有位置问题，不能视为整篇核验通过。表格单元格在推荐引擎中默认保留原文；无文本层扫描件应选择 OCR。OCR 依赖视觉模型，可能识别错误；重排布局与原文不同。详见 [验证记录](VERIFICATION.md)。
+开发检查：npm run build、npm run check、npm test、npm run test:visual；Python 使用 `python -m unittest discover -s work -p 'test_*.py'`。历史 OCR 恢复模块的回归另在 work/ocr 下运行。打包后用 scripts/verify-package.mjs 检查 tgz。
 
-## 开发与验证
+固定依赖：pdf2zh-next 2.10.2 / BabelDOC 0.7.1、MinerU 4.2.3。升级前需重新验证识别 PDF、公式和页码。安装包不包含密钥、论文、缓存、虚拟环境或模型权重。详细记录见 [VERIFICATION.md](VERIFICATION.md)。
 
-```powershell
-npm ci
-python -m pip install -r requirements.txt
-./scripts/setup-ocr.ps1 -DataDir "$PWD/tmp/ocr-test"
-$env:DSH_PDF_RUNTIME_DIR="$PWD/tmp/ocr-test/runtime"
-npm run build
-npm run check
-npm test
-python -m unittest discover -s work -p 'test_*.py'
-python -m unittest discover -s work/ocr -p 'test_*.py'
-npm pack
-node scripts/verify-package.mjs dsh-pdf-translator-1.1.0.tgz
-```
+## 许可证
 
-两套 Python 测试分别运行，避免同名模块冲突。OCR 回归包含真实 LaTeX 编译，需联网准备资源；模型调用使用固定测试响应。推荐引擎固定为 pdf2zh-next 2.10.2 / BabelDOC 0.7.1，升级依赖前需重新验证兼容补丁。安装包不包含用户密钥、论文、缓存、虚拟环境或测试输出。
-
-## 许可证和源码
-
-1.1.0 集成版按 [GNU AGPL-3.0](LICENSE) 发布完整源码与构建脚本；旧版 MIT 声明保留在 [LICENSE-MIT](LICENSE-MIT)，原有授权不变。第三方来源和许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。对应版本源码可从本仓库同名 Git 标签获取。
+插件按 [GNU AGPL-3.0](LICENSE) 发布；旧 MIT 声明保留在 [LICENSE-MIT](LICENSE-MIT)。MinerU 是独立安装的上游依赖，适用其 [MinerU Open Source License](https://github.com/opendatalab/MinerU/blob/master/LICENSE.md)。第三方来源见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

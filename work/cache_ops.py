@@ -54,6 +54,7 @@ def cache_list(data_dir):
                 pass
         rows.append({'id':folder.name, 'name':Path(source).name or folder.name, 'source':source,
                      'bytes':sum(p.stat().st_size for p in files),
+                     'engine':'mineru' if (folder / 'mineru').is_dir() else 'pdf2zh',
                      'lastUsed':max((p.stat().st_mtime for p in files), default=folder.stat().st_mtime)*1000,
                      'blocked':blocked})
     return sorted(rows, key=lambda r:r['lastUsed'], reverse=True)

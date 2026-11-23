@@ -32,6 +32,7 @@ function controlledRunner(){
       if(r.operation==='cacheList')return {entries:[{id:'aaaaaaaaaaaaaaaa',name:'paper.pdf',bytes:1,blocked:''}]};
       if(r.operation==='cacheClear')return {cleared:true};
       progress=onProgress;
+      signal?.throwIfAborted();
       return new Promise((a,b)=>{resolve=a;reject=b;signal?.addEventListener('abort',()=>reject(new Error('cancelled')),{once:true});});
     }};
 }

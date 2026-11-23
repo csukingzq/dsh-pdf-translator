@@ -1,0 +1,6 @@
+# Private renderer adapters are verified against these exact versions.
+docvortex==0.6.26
+reportlab==5.1.0
+ziamath==0.13
+ziafont==0.11
+fonttools==4.68.0

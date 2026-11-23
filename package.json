@@ -1,7 +1,7 @@
 {
   "name": "dsh-pdf-translator",
-  "version": "1.1.3",
-  "description": "Dual-engine PDF translation for DeepSeek Harness: pdf2zh-next / BabelDOC and vision OCR with LaTeX",
+  "version": "1.2.0",
+  "description": "PDF2zh translation with optional local MinerU recognition for scanned PDFs",
   "type": "module",
   "main": "src/index.js",
   "author": "csukingzq",
@@ -32,7 +32,9 @@
     "!work/ocr/test_*.py",
     "requirements-structure.txt",
     "LICENSE-MIT",
-    "THIRD_PARTY_NOTICES.md"
+    "THIRD_PARTY_NOTICES.md",
+    "requirements-mineru.txt",
+    "requirements-mineru-render.txt"
   ],
   "dsh": {
     "bundle": {

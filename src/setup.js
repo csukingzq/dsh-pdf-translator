@@ -14,6 +14,7 @@ const PHASE_TEXT = {
   python: '创建 Python 环境…',
   dependencies: '安装 Python 依赖…',
   engine: '安装翻译引擎（pdf2zh-next）…',
+  mineru: '安装本机 MinerU 识别环境…',
   tectonic:'下载 Tectonic…', pandoc:'下载 Pandoc…',
   done: '环境已就绪',
 };
@@ -21,6 +22,7 @@ const PHASE_RULES = [
   [/Creating Python environment/i, 'python'],
   [/Installing Python dependencies/i, 'dependencies'],
   [/Installing the translation engine/i, 'engine'],
+  [/Installing MinerU/i, 'mineru'],
   [/Downloading tectonic/i,'tectonic'], [/Downloading pandoc/i,'pandoc'],
   [/PDF translator environment is ready/i, 'done'],
 ];

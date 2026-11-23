@@ -13,7 +13,7 @@ import {DualSetupController} from './dual-setup.js';
 const activeStates = new Set(['preparing', 'running', 'stopping']);
 const phases = {analyzing:'解析版式',glossary:'提取术语',translating:'翻译段落',typesetting:'排版生成 PDF',preparing:'准备', analyzing_structure:'分析全文结构', recognizing:'逐页识别', translating_paragraphs:'翻译正文段落', validating:'校验译文', assembling:'组装译文', compiling:'编译 PDF', exporting:'导出成果', completed:'完成'};
 export function progressText(p) {
-  if(p.percent!==undefined)return `${phases[p.phase]||p.phase} · ${p.percent}%${p.total?` · ${p.completed||0}/${p.total} 段`:''}`;
+  if(p.percent!==undefined)return `${phases[p.phase]||p.phase} · ${p.percent}%${p.total?` · ${p.completed||0}/${p.total} ${p.unit||'段'}`:''}`;
   return `${phases[p.phase] || p.phase} · ${p.completed || 0}/${p.total || 0} 页 · 缓存 ${p.cached || 0} 页`;
 }
 export class TranslatorManager {
@@ -34,9 +34,9 @@ export class TranslatorManager {
   async load() {
     try { this.state=JSON.parse(await fs.readFile(this.stateFile,'utf8')); }
     catch(e){ if(e.code!=='ENOENT') throw new Error('插件状态文件无法读取，请保留文件并检查：'+this.stateFile); }
-    this.state.engine=this.state.engine==='ocr'?'ocr':'pdf2zh';
+    this.state.engine=['ocr','mineru'].includes(this.state.engine)?'mineru':'pdf2zh';
     for(const task of this.state.tasks){task.args.engine ??= task.result?.dual?'pdf2zh':'ocr';}
-    this.state.aiReview=this.state.aiReview===true;
+    this.state.aiReview=false;
     const journals=path.join(this.dataDir,'work','review-transactions');
     try{if((await fs.readdir(journals)).length)await this.runner({operation:'reviewRecover',engine:'ocr'},this.config);}catch(e){if(e.code!=='ENOENT')throw e;}
     for(const task of this.state.tasks) if(['reviewing','repairing'].includes(task.status)) {
@@ -68,7 +68,7 @@ export class TranslatorManager {
   async settings(input){await this.ready; const value=typeof input==='string'?{outputDir:input}:input;
     if(value.outputDir!==undefined){this.state.outputDir=await this.outputDirectory(value.outputDir);this.state.configured=true;}
     if(value.engine!==undefined)this.state.engine=value.engine;
-    if(value.aiReview!==undefined)this.state.aiReview=value.aiReview===true;
+    this.state.aiReview=false;
     await this.persist();return {outputDir:this.state.outputDir,configured:this.state.configured,engine:this.state.engine,aiReview:this.state.aiReview};}
   async status(owner){await this.ready;if(this.setup.prime)await this.setup.prime();return {outputDir:this.state.outputDir,configured:this.state.configured,
     aiReview:this.state.aiReview,engine:this.state.engine,setup:this.setup.snapshot(this.state.engine),setups:this.setup.snapshots?.(),
@@ -96,8 +96,7 @@ export class TranslatorManager {
   async start(input, owner, exec={}) {
     const args=translateSchema.parse(input); await this.ready;
     args.engine ??= this.state.engine || 'pdf2zh';
-    if(args.engine==='pdf2zh' && (args.aiReview || args.renderOnly || args.imageQuality || args.thinking))throw new Error('AI 核验、图片质量、思考及缓存重排选项仅适用于 OCR 模式。');
-    args.aiReview=args.engine==='ocr' && (args.aiReview??this.state.aiReview);
+    args.aiReview=false;
     if(this.closed) throw new Error('插件正在关闭。');
     if(this.active) {
       if(this.active.owner===owner) return {background:true,jobId:this.active.id,existing:true};
@@ -106,7 +105,7 @@ export class TranslatorManager {
     if(this.busy||this.review.active()||this.setup.running) throw new Error('正在准备任务、核验或清理缓存，请稍后再试。');
     if(this.setup.prime)await this.setup.prime(args.engine);
     const environment=this.setup.snapshot(args.engine);
-    if(!environment.ready && !(args.engine==='ocr' && args.renderOnly && environment.runtimeReady)){
+    if(!environment.ready){
       if(owner) this.panel(owner,'translation',true);
       throw new Error('首次使用需要准备运行环境并填写模型配置：请在 PDF 翻译面板点击“一键准备环境”。');
     }
@@ -169,7 +168,7 @@ export class TranslatorManager {
   }
   async caches(){await this.ready;const pdf=await this.runner({operation:'cacheList',engine:'pdf2zh'},this.config);
     const ocr=await this.runner({operation:'cacheList',engine:'ocr'},this.config);
-    const result={entries:[...pdf.entries.map(r=>({...r,engine:'pdf2zh'})),...ocr.entries.map(r=>({...r,id:'ocr:'+r.id,engine:'ocr'}))]};
+    const result={entries:[...pdf.entries.map(r=>({...r,engine:r.engine||'pdf2zh'})),...ocr.entries.map(r=>({...r,id:'ocr:'+r.id,engine:'ocr'}))]};
     return {entries:result.entries.map(r=>({...r,busy:this.active?.identity===r.id.replace(/^ocr:/,'')||this.review.active()?.identity===r.id.replace(/^ocr:/,'')})),cleaningDisabled:Boolean(this.active||this.busy||this.review.active())};}
   async prepareClear(identity){
     const {entries}=await this.caches();const row=entries.find(r=>r.id===identity);

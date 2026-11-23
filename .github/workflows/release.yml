@@ -61,6 +61,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m unittest discover -s work/ocr -p "test_*.py"
 
+      - name: Test isolated MinerU formula rendering
+        shell: powershell
+        run: ./scripts/test-mineru-render.ps1 -Environment "$env:RUNNER_TEMP/mineru-render-test"
+
       - name: Pack release artifact
         shell: powershell
         run: |

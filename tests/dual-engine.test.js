@@ -14,43 +14,48 @@ async function temporary(t){
   return dir;
 }
 const fixture=path.join(root,'tests/fixtures/vision-sample.pdf');
-test('engine selection routes work and only OCR can enter review, including legacy preference',async t=>{
+test('MinerU replaces the old OCR preference and cannot start AI review',async t=>{
   const dir=await temporary(t),calls=[];
-  const runner=async r=>{
-    calls.push(r);
-    if(r.operation==='inspect')return {path:fixture,selected_pages:[1]};
-    if(r.operation==='translate')return r.engine==='ocr'?{output:'ocr.pdf',project:'source.zip'}:{output:'mono.pdf',dual:'dual.pdf'};
-  };
+  await fs.mkdir(path.join(dir,'work'));
+  await fs.writeFile(path.join(dir,'work/plugin-state.json'),JSON.stringify({engine:'ocr',aiReview:true,outputDir:path.join(dir,'outputs'),tasks:[]}));
+  const runner=async r=>{calls.push(r);return r.operation==='inspect'?{path:fixture,selected_pages:[1]}:{output:'mono.pdf',dual:'dual.pdf',mineru:'recognized.pdf'};};
   const setup={running:false,snapshot:()=>({ready:true}),cancel(){}};
   const manager=new TranslatorManager({get:()=>null},{dataDir:dir},runner,undefined,setup);
-  t.after(()=>manager.dispose());
-  await manager.settings({aiReview:true});
-  const pdf=await manager.start({pdf:fixture,background:false},'owner');
-  assert.equal(pdf.engine,'pdf2zh');assert.equal(pdf.aiReview,false);assert.match(pdf.completionPolicy,/dual/);
-  await assert.rejects(manager.start({pdf:fixture,engine:'pdf2zh',aiReview:true},'owner'),/仅适用于 OCR/);
-  await assert.rejects(manager.start({pdf:fixture,engine:'pdf2zh',renderOnly:true},'owner'),/仅适用于 OCR/);
-  const task=manager.state.tasks[0];task.aiReview=true;
-  await assert.rejects(manager.review.call({jobId:task.id,action:'inspect'},'owner'),/仅 OCR/);
-  await manager.settings({engine:'ocr'});
-  const ocr=await manager.start({pdf:fixture,background:false},'owner');
-  assert.equal(ocr.engine,'ocr');assert.equal(ocr.aiReview,true);assert.match(ocr.completionPolicy,/pdf_review/);
-  assert.equal(manager.state.tasks.at(-1).status,'reviewing');
-  assert.deepEqual(calls.filter(r=>r.operation==='translate').map(r=>r.engine),['pdf2zh','ocr']);
+  t.after(()=>manager.dispose());await manager.ready;
+  assert.equal(manager.state.engine,'mineru');assert.equal(manager.state.aiReview,false);
+  await assert.rejects(manager.start({pdf:fixture,engine:'ocr'},'owner'));
+  await assert.rejects(manager.start({pdf:fixture,engine:'mineru',aiReview:true},'owner'));
+  await assert.rejects(manager.start({pdf:fixture,renderOnly:true},'owner'));
+  const result=await manager.start({pdf:fixture,background:false},'owner');
+  assert.equal(result.engine,'mineru');assert.equal(result.aiReview,false);
+  assert.match(result.completionPolicy,/mineru/);
+  assert.equal(manager.state.tasks.at(-1).status,'completed');
+  assert.equal(calls.find(r=>r.operation==='translate').engine,'mineru');
 });
 
-test('per-engine model edits preserve legacy settings, both keys and unknown options without exposing secrets',async t=>{
+test('both routes share text model edits and preserve old vision credentials',async t=>{
   const dir=await temporary(t),file=path.join(dir,'config.json');
-  await fs.writeFile(file,JSON.stringify({base_url:'https://legacy.invalid',model:'vision',api_key:'legacy-secret',auto_repair_rounds:3}));
+  await fs.writeFile(file,JSON.stringify({base_url:'https://legacy.invalid',model:'vision',api_key:'legacy-secret',auto_repair_rounds:3,engines:{ocr:{api_key:'vision-secret'}}}));
   const setup=new DualSetupController({dataDir:dir},{probe:false});
-  assert.equal(setup.snapshot('ocr').config.model,'vision');
   setup.saveConfig({engine:'pdf2zh',baseUrl:'https://text.invalid',model:'text',apiKey:'text-secret'});
-  setup.saveConfig({engine:'ocr',baseUrl:'https://vision.invalid',model:'vision-new'});
-  setup.saveConfig({engine:'pdf2zh',baseUrl:'https://text.invalid',model:'text-new'});
+  assert.equal(setup.snapshot('mineru').config.model,'text');
+  setup.saveConfig({engine:'mineru',baseUrl:'https://text.invalid',model:'text-new'});
   const data=JSON.parse(await fs.readFile(file,'utf8'));
   assert.equal(data.model,'vision');assert.equal(data.auto_repair_rounds,3);
-  assert.equal(data.engines.ocr.api_key,'legacy-secret');assert.equal(data.engines.pdf2zh.api_key,'text-secret');
-  assert.equal(setup.snapshot('ocr').config.model,'vision-new');assert.equal(setup.snapshot('pdf2zh').config.model,'text-new');
+  assert.equal(data.engines.ocr.api_key,'vision-secret');assert.equal(data.engines.pdf2zh.api_key,'text-secret');
+  assert.equal(setup.snapshot('mineru').config.model,'text-new');assert.equal(setup.snapshot('pdf2zh').config.model,'text-new');
   assert.doesNotMatch(JSON.stringify(setup.snapshots()),/secret/);
+  assert.deepEqual(Object.keys(setup.snapshots()),['pdf2zh','mineru']);
+});
+
+test('MinerU setup also requires PDF2zh, and stale markers cannot hide a missing interpreter',async t=>{
+  const dir=await temporary(t),setup=new DualSetupController({dataDir:dir},{probe:false});
+  await fs.mkdir(path.join(dir,'runtime'));
+  await fs.writeFile(path.join(dir,'runtime/mineru.json'),JSON.stringify({version:'4.2.3'}));
+  assert.equal(setup.snapshot('mineru').runtimeReady,false);
+  const python=path.join(dir,'.venv-mineru',process.platform==='win32'?'Scripts/python.exe':'bin/python');
+  await fs.mkdir(path.dirname(python),{recursive:true});await fs.writeFile(python,'');
+  assert.equal(setup.snapshot('mineru').runtimeReady,false);
 });
 
 test('cache confirmations isolate the two engines for the same document',async t=>{
@@ -69,7 +74,7 @@ test('cache confirmations isolate the two engines for the same document',async t
 });
 
 test('real Python subprocesses inspect with both isolated entry points',async()=>{
-  for(const engine of ['pdf2zh','ocr']){
+  for(const engine of ['pdf2zh','mineru','ocr']){
     const result=await runPython({operation:'inspect',engine,pdf:fixture,pages:'1'},{pythonPath:existsSync(path.join(root,'.venv/Scripts/python.exe'))?path.join(root,'.venv/Scripts/python.exe'):'python'});
     assert.equal(result.pages,1);assert.deepEqual(result.selected_pages,[1]);
   }

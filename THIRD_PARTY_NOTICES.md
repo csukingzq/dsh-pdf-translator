@@ -46,3 +46,21 @@ Redistributors must preserve applicable notices and provide corresponding
 source under the applicable licenses. Modified network deployments must also
 observe AGPL source-offer requirements. The software license does not cover
 users' input papers, translations, credentials or private caches.
+
+## Local recognition (1.2.0+)
+
+- MinerU 4.2.3, OpenDataLab / MinerU Team and contributors:
+  https://github.com/opendatalab/MinerU
+  Separately installed into an isolated environment, used through its public
+  Python SDK for local Basic OCR and original-layout PDF rendering. No MinerU
+  source or model weights are copied into this package. Its MinerU Open Source
+  License (Apache-2.0 with additional terms) is available at
+  https://github.com/opendatalab/MinerU/blob/master/LICENSE.md .
+  Transitive dependencies and model weights retain their own licenses.
+  The legacy OCR components above are retained only for history/cache recovery.
+
+The worker applies scoped compatibility adapters to DocVortex 0.6.26,
+ReportLab 5.1.0 (BSD), ZiaMath 0.13 and ZiaFont 0.11 (MIT), using FontTools
+4.68.0 (MIT). These retain formula glyphs as embedded text and preserve inline
+reading order. Installed dependency sources are not modified. Font licenses
+remain with the fonts bundled by those dependencies.
