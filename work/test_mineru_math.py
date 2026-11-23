@@ -10,6 +10,24 @@ AVAILABLE = find_spec('docvortex') is not None
 
 @unittest.skipUnless(AVAILABLE, 'requires isolated MinerU environment')
 class MineruMathTests(unittest.TestCase):
+    def test_scripted_stretchy_fences_have_readable_geometry(self):
+        from docvortex.render._internal.pdf.formula import FormulaRenderer, DisplayFormulaFlowable
+        from mineru_math import text_formula_glyphs
+        samples=[
+            r'\sigma_S=\left[\prod_{i\in S}(d_i^2+d_i-1)\right]^{1/2}.',
+            r'F(\rho,|\Lambda\rangle\langle\Lambda|)=\frac{1}{4}\left[\sum_{\mu\in\mathcal{I}}\rho_{\mu,\mu}+2\sum_{\stackrel{\mu,\nu\in\mathcal{I}}{\mu<\nu}}\operatorname{Re}(\rho_{\mu,\nu})\right].',
+            r'\left(\frac{1}{1+\left[\frac{x}{y}\right]^2}\right)^{1/2}',
+        ]
+        with text_formula_glyphs():
+            for latex in samples:
+                with self.subTest(latex=latex):
+                    vector=FormulaRenderer().render(latex,inline=False,font_size=10)
+                    self.assertGreater(vector.height,10)
+                    self.assertLess(vector.height,80)
+                    flow=DisplayFormulaFlowable(vector,font_size=10)
+                    flow.fit_to_box(350,max_height=48,font_size=10)
+                    self.assertGreaterEqual(flow.effective_font_size,6)
+
     def render(self, patched):
         from reportlab.pdfgen.canvas import Canvas
         from docvortex.render._internal.pdf.formula import FormulaRenderer
@@ -54,11 +72,12 @@ class MineruMathTests(unittest.TestCase):
         from ziafont.glyph import SimpleGlyph
         from docvortex.render._internal.pdf import formula
         from mineru_math import text_formula_glyphs
-        original=(SimpleGlyph.place,formula._append_svg_element)
+        from ziamath.nodes.moperator import Moperator
+        original=(SimpleGlyph.place,formula._append_svg_element,Moperator._setup)
         with self.assertRaises(RuntimeError):
             with text_formula_glyphs():
                 raise RuntimeError('test')
-        self.assertEqual((SimpleGlyph.place,formula._append_svg_element),original)
+        self.assertEqual((SimpleGlyph.place,formula._append_svg_element,Moperator._setup),original)
 
     def test_inline_formula_reading_order_and_multiline_geometry(self):
         from reportlab.lib.styles import ParagraphStyle

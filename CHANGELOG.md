@@ -1,3 +1,9 @@
+# 1.2.1 Standard 识别与公式渲染修复
+
+- MinerU 默认改为本机 Standard：小模型配合本地 llama.cpp VLM，模型优先从 ModelScope 下载。
+- 修复嵌套可伸缩括号及上下标触发公式边界测量异常，导致整条公式缩小到近乎不可见的问题。
+- 识别缓存区分 Standard 档位并更新渲染修订号，避免复用旧的异常识别 PDF。
+
 # 1.2.0 MinerU 本机识别与 PDF2zh 串联
 
 - 将视觉大模型 OCR / LaTeX 引擎替换为 MinerU 本机识别，生成带文字的原版式 PDF 后自动交给 PDF2zh 翻译。

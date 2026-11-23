@@ -22,7 +22,7 @@
 
 Python 依赖优先使用清华、阿里镜像，失败回退官方 PyPI。MinerU 识别模型从 ModelScope 下载；缺少模型时首次识别会下载，之后复用。安装、下载和 CPU 识别可能耗时较长，可取消后重试。面板保留检查更新功能。
 
-MinerU 固定使用本地 Basic 档位进行 OCR、公式和表格识别，不连接远程 MinerU/VLM 服务；识别不消耗外部模型 API token。PDF2zh 翻译仍将文字发送到配置的接口并产生相应费用。
+MinerU 固定使用本地 Standard 档位，以小模型配合本地 VLM 进行 OCR、公式和表格识别。Windows 下 VLM 使用 llama.cpp；首次处理会通过 ModelScope 下载所需权重，后续复用本地模型。不会连接远程 MinerU/VLM 服务，识别不消耗外部模型 API token。PDF2zh 翻译仍将文字发送到配置的接口并产生相应费用。
 
 ## 页码、成果与缓存
 

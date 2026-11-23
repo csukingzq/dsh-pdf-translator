@@ -81,6 +81,19 @@ class MineruPipelineTests(unittest.TestCase):
         self.assertFalse(cache_ops.cache_list(self.root))
 
     @patch('cli.engine_version', return_value='2.10.2')
+    def test_standard_does_not_reuse_basic_recognition(self, _):
+        import engine
+        with patch.object(mineru_cli, 'run_worker', side_effect=self.worker), patch.object(engine, 'run', side_effect=self.engine):
+            with patch.object(mineru_cli, 'TIER', 'basic'):
+                self.run_pipeline()
+            standard=self.run_pipeline()
+            again=self.run_pipeline()
+        self.assertEqual(standard['mineru_tier'], 'standard')
+        self.assertFalse(standard['recognition_cached'])
+        self.assertTrue(again['recognition_cached'])
+        self.assertEqual(self.worker_calls, 2)
+
+    @patch('cli.engine_version', return_value='2.10.2')
     def test_failed_translation_retains_recognition_and_retry_reuses_it(self, _):
         import engine
         with patch.object(mineru_cli, 'run_worker', side_effect=self.worker), patch.object(engine, 'run', side_effect=RuntimeError('offline')):

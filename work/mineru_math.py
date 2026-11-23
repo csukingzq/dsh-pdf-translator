@@ -25,14 +25,28 @@ def text_formula_glyphs():
     from docvortex.render._internal.pdf.renderer import _PdfCanvas
     from reportlab.platypus import paragraph
     from reportlab.lib.rl_accel import fp_str
+    from ziamath.nodes.moperator import Moperator
+    from ziafont.fonttypes import BBox
 
     original_place = SimpleGlyph.place
     original_append = formula._append_svg_element
     original_cmap = ttfonts.makeToUnicodeCMap
     original_line = paragraph._putFragLine
     original_image = _PdfCanvas.drawImage
+    original_operator_setup = Moperator._setup
     fonts = {}
     failures = []
+
+    def operator_setup(node, **kwargs):
+        original_operator_setup(node, **kwargs)
+        # ZiaMath 0.13 excludes stretchy fences from its measuring pass by
+        # leaving bbox.ymin=999 / ymax=-999. A scripted or nested fence then
+        # uses that inverted box as real geometry, inflating the formula to
+        # ~2000 pt. DocVortex fits it into its source box at sub-point size.
+        # An excluded operator must instead have a neutral vertical extent.
+        box = node.bbox
+        if kwargs.get('nostretch') and box.ymax < box.ymin:
+            node.bbox = BBox(box.xmin, box.xmax, 0.0, 0.0)
 
     def font_for(glyph):
         filename = str(glyph.font.info.filename)
@@ -129,6 +143,7 @@ def text_formula_glyphs():
 
     paragraph._putFragLine = put_line
     _PdfCanvas.drawImage = draw_image
+    Moperator._setup = operator_setup
     try:
         yield
         if failures:
@@ -139,3 +154,4 @@ def text_formula_glyphs():
         ttfonts.makeToUnicodeCMap = original_cmap
         paragraph._putFragLine = original_line
         _PdfCanvas.drawImage = original_image
+        Moperator._setup = original_operator_setup

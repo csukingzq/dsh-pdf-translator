@@ -16,7 +16,7 @@ import time
 import cli
 import cache_ops
 import outputs
-from mineru_host import VERSION, RENDERER_VERSION
+from mineru_host import VERSION, RENDERER_VERSION, TIER
 
 
 def python_path(data_dir):
@@ -85,8 +85,8 @@ def translate(request, data_dir, config_path, on_progress=None):
         raise ValueError('输出目录不能位于插件工作目录内。')
     progress = on_progress or (lambda value: None)
     identity = hashlib.sha256(source.read_bytes()).hexdigest()[:16]
-    key = hashlib.sha256(json.dumps({'version': VERSION, 'renderer': RENDERER_VERSION, 'tier': 'basic', 'pages': selected,
-                                    'layout': 'original', 'revision': 4}).encode()).hexdigest()[:20]
+    key = hashlib.sha256(json.dumps({'version': VERSION, 'renderer': RENDERER_VERSION, 'tier': TIER, 'pages': selected,
+                                    'layout': 'original', 'revision': 5}).encode()).hexdigest()[:20]
     with cli.exclusive(data_dir):
         cache = cache_ops.prepare_cache(data_dir, identity, source) / 'mineru' / key
         cache.mkdir(parents=True, exist_ok=True)
@@ -124,7 +124,7 @@ def translate(request, data_dir, config_path, on_progress=None):
             outputs._cleanup(prepared)
             raise RuntimeError(f'识别 PDF 已保留：{mineru_pdf}\nPDF2zh 翻译失败：{exc}') from exc
         result.update(mineru=str(mineru_pdf), source=str(source), selected_pages=selected,
-                      mineru_version=VERSION, recognition_cached=cached, engine='mineru')
+                      mineru_version=VERSION, mineru_tier=TIER, recognition_cached=cached, engine='mineru')
         progress({'phase': 'completed', 'percent': 100})
         return result
 
@@ -149,7 +149,7 @@ def execute(request, on_progress=None):
                 ready = probe.returncode == 0 and version == f'{VERSION}/{RENDERER_VERSION}'
             except (OSError, subprocess.TimeoutExpired):
                 pass
-        result['mineru'] = {'ready': ready, 'version': version, 'tier': 'basic', 'local': True}
+        result['mineru'] = {'ready': ready, 'version': version, 'tier': TIER, 'local': True}
         return result
     return cli.execute(request, on_progress)
 

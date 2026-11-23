@@ -1,6 +1,6 @@
 {
   "name": "dsh-pdf-translator",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "PDF2zh translation with optional local MinerU recognition for scanned PDFs",
   "type": "module",
   "main": "src/index.js",
