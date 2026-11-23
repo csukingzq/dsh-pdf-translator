@@ -14,7 +14,9 @@ class MineruPipelineTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        # Windows CI may expose TEMP through an 8.3 alias (RUNNER~1).
+        # Production inspection resolves it to the canonical long path.
+        self.root = Path(self.temp.name).resolve()
         self.source = self.root / 'book.pdf'
         with pymupdf.open() as doc:
             for n in range(1, 6):
